@@ -7,7 +7,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
-PHOTO_STORAGE_CHAT_ID = int(os.getenv("PHOTO_STORAGE_CHAT_ID", "0"))
+PHOTO_STORAGE_CHAT_ID = os.getenv("PHOTO_STORAGE_CHAT_ID", "@dachanabaikale")
 PRICE_PER_ADULT = 1500
 ALL_ROOMS_PRICE = 18000
 HOTEL_ADDRESS = "село Максимиха, ул. Дачная, 12"

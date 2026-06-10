@@ -531,37 +531,7 @@ async def get_file_id(bot: Bot, file_path: str) -> str:
 async def get_file_id_with_fallback(
     bot: Bot, file_path: str, fallback_chat_id: int | None = None
 ) -> str:
-    try:
-        return await get_file_id(bot, file_path)
-    except TelegramBadRequest as storage_error:
-        chat_ids = []
-        for chat_id in (ADMIN_CHAT_ID, fallback_chat_id):
-            if chat_id and chat_id != PHOTO_STORAGE_CHAT_ID and chat_id not in chat_ids:
-                chat_ids.append(chat_id)
-
-        last_error = storage_error
-        for chat_id in chat_ids:
-            try:
-                message = await bot.send_photo(
-                    chat_id=chat_id, photo=FSInputFile(file_path)
-                )
-                file_id = message.photo[-1].file_id
-                photo_file_id_cache[file_path] = file_id
-                try:
-                    await message.delete()
-                except TelegramBadRequest:
-                    pass
-                logging.info("Cached photo %s using fallback chat %s", file_path, chat_id)
-                return file_id
-            except TelegramBadRequest as fallback_error:
-                last_error = fallback_error
-                logging.warning(
-                    "Fallback photo cache chat %s is unavailable for %s: %s",
-                    chat_id,
-                    file_path,
-                    fallback_error,
-                )
-        raise last_error
+    return await get_file_id(bot, file_path)
 
 
 ALLOWED_EXTENSIONS = {".py", ".db", ".env"}
