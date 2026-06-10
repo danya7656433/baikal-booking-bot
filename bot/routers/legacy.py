@@ -528,6 +528,42 @@ async def get_file_id(bot: Bot, file_path: str) -> str:
         raise
 
 
+async def get_file_id_with_fallback(
+    bot: Bot, file_path: str, fallback_chat_id: int | None = None
+) -> str:
+    try:
+        return await get_file_id(bot, file_path)
+    except TelegramBadRequest as storage_error:
+        chat_ids = []
+        for chat_id in (ADMIN_CHAT_ID, fallback_chat_id):
+            if chat_id and chat_id != PHOTO_STORAGE_CHAT_ID and chat_id not in chat_ids:
+                chat_ids.append(chat_id)
+
+        last_error = storage_error
+        for chat_id in chat_ids:
+            try:
+                message = await bot.send_photo(
+                    chat_id=chat_id, photo=FSInputFile(file_path)
+                )
+                file_id = message.photo[-1].file_id
+                photo_file_id_cache[file_path] = file_id
+                try:
+                    await message.delete()
+                except TelegramBadRequest:
+                    pass
+                logging.info("Cached photo %s using fallback chat %s", file_path, chat_id)
+                return file_id
+            except TelegramBadRequest as fallback_error:
+                last_error = fallback_error
+                logging.warning(
+                    "Fallback photo cache chat %s is unavailable for %s: %s",
+                    chat_id,
+                    file_path,
+                    fallback_error,
+                )
+        raise last_error
+
+
 ALLOWED_EXTENSIONS = {".py", ".db", ".env"}
 
 
@@ -2288,7 +2324,7 @@ async def view_room(callback: CallbackQuery, state: FSMContext, bot: Bot):
         if photos:
             photo_name = os.path.basename(photos[0]).lower()
             logging.info(f"Попытка загрузки фото комнаты {room.name}: {photo_name}")
-            file_id = await get_file_id(bot, photos[0])
+            file_id = await get_file_id_with_fallback(bot, photos[0], callback.from_user.id)
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -3866,12 +3902,9 @@ async def show_territory_overview(callback: CallbackQuery, state: FSMContext, bo
         # Проверяем кэш перед загрузкой
         file_id = photo_file_id_cache.get(photo_path)
         if not file_id:
-            photo = FSInputFile(photo_path)
-            message = await bot.send_photo(chat_id=PHOTO_STORAGE_CHAT_ID, photo=photo)
-            file_id = message.photo[-1].file_id
-            photo_file_id_cache[photo_path] = file_id
-            logging.info(f"Кэширован file_id для {photo_path}: {file_id}")
-            await message.delete()
+            file_id = await get_file_id_with_fallback(
+                bot, photo_path, callback.from_user.id
+            )
 
         description = photo_descriptions.get(photo_name, "")
         # Обновляем сообщение с первой фотографией
@@ -4039,7 +4072,7 @@ async def show_rooms_description(callback: CallbackQuery, state: FSMContext, bot
         if photos:
             photo_name = os.path.basename(photos[0]).lower()
             logging.info(f"Попытка загрузки фото комнаты {room.name}: {photo_name}")
-            file_id = await get_file_id(bot, photos[0])
+            file_id = await get_file_id_with_fallback(bot, photos[0], callback.from_user.id)
             try:
                 await callback.message.edit_media(
                     media=InputMediaPhoto(
@@ -4632,7 +4665,7 @@ async def render_room_gallery(
             )
         return
 
-    file_id = await get_file_id(bot, photos[0])
+    file_id = await get_file_id_with_fallback(bot, photos[0], callback.from_user.id)
     caption = f"{text}\n\nФото 1/{len(photos)}"
     media = InputMediaPhoto(media=file_id, caption=caption)
     try:
@@ -4741,7 +4774,7 @@ async def navigate_photos(callback: CallbackQuery, state: FSMContext, bot: Bot):
                 os.path.basename(photo_list[photo_index]).lower().replace(" ", "")
             )
             logging.info(f"Переключение фото территории: {photo_name}")
-            file_id = await get_file_id(bot, photo_list[photo_index])
+            file_id = await get_file_id_with_fallback(bot, photo_list[photo_index], callback.from_user.id)
             description = photo_descriptions.get(photo_name, "")
             caption = f"{general_text}\n{description}\n\nФото {photo_index + 1}/{len(photo_list)}"
 
@@ -4791,7 +4824,7 @@ async def navigate_photos(callback: CallbackQuery, state: FSMContext, bot: Bot):
             text = get_room_description_text(room)
             photo_name = os.path.basename(photo_list[photo_index]).lower()
             logging.info(f"Переключение фото комнаты {room.name}: {photo_name}")
-            file_id = await get_file_id(bot, photo_list[photo_index])
+            file_id = await get_file_id_with_fallback(bot, photo_list[photo_index], callback.from_user.id)
             caption = f"{text}\n\nФото {photo_index + 1}/{len(photo_list)}"
             # Проверяем, изменилось ли содержимое
             current_caption = getattr(callback.message, "caption", "") or ""
