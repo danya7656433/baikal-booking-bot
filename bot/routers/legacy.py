@@ -524,7 +524,7 @@ async def get_file_id(bot: Bot, file_path: str) -> str:
         await message.delete()
         return file_id
     except Exception as e:
-        logging.error(f"Ошибка при получении file_id для {file_path}: {str(e)}")
+        logging.warning(f"Служебный чат фото недоступен для {file_path}: {str(e)}")
         raise
 
 
@@ -654,13 +654,7 @@ async def preload_photo_cache(bot: Bot):
         for photo_path in photos:
             if photo_path not in photo_file_id_cache:
                 try:
-                    photo = FSInputFile(photo_path)
-                    message = await bot.send_photo(
-                        chat_id=PHOTO_STORAGE_CHAT_ID, photo=photo
-                    )
-                    file_id = message.photo[-1].file_id
-                    photo_file_id_cache[photo_path] = file_id
-                    await message.delete()
+                    file_id = await get_file_id_with_fallback(bot, photo_path)
                     logging.info(f"Preloaded file_id for {photo_path}: {file_id}")
                 except Exception as e:
                     logging.error(
