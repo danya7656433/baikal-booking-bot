@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.log
+*.lock
+booking.db
+data/
+backups/
+reports/
+temp_updates/
