@@ -7709,6 +7709,41 @@ async def handle_text_out_of_context(message: Message, state: FSMContext):
     )
 
 
+@router.message(F.photo, StateFilter(None))
+async def recover_payment_photo_from_reply(message: Message, state: FSMContext):
+    reply = message.reply_to_message
+    prompt_text = ((reply.text or reply.caption) if reply else "") or ""
+    match = re.search(r"заявки\s+#(\d+)", prompt_text, re.IGNORECASE)
+    if not match or "фото чека" not in prompt_text.lower():
+        await handle_non_text_out_of_context(message, state)
+        return
+
+    booking_id = int(match.group(1))
+    booking = (
+        session.query(Booking)
+        .filter_by(
+            id=booking_id,
+            user_id=message.from_user.id,
+            status=BookingStatus.AWAITING_PAYMENT.value,
+        )
+        .first()
+    )
+    if not booking:
+        await message.answer(
+            f"❌ Заявка #{booking_id} не найдена или уже не ожидает оплату."
+        )
+        return
+
+    logging.warning(
+        "Recovered lost payment screenshot state for booking #%s, user %s",
+        booking_id,
+        message.from_user.id,
+    )
+    await state.update_data(booking_id=booking_id)
+    await state.set_state(BookingStates.waiting_for_payment_screenshot)
+    await handle_payment_photo(message, state)
+
+
 @router.message(~F.text, StateFilter(None))
 async def handle_non_text_out_of_context(message: Message, state: FSMContext):
     user_id = message.from_user.id
