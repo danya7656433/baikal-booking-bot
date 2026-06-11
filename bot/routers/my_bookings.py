@@ -11,7 +11,7 @@ from bot.states import BookingStates
 from config import ACTIVE_BOOKING_STATUSES, BookingStatus, room_type_names
 from database import Booking, BookingHistory, session
 from services.booking_service import get_children_beds
-from services.financial_service import calculate_booking_balance
+from services.financial_service import calculate_booking_balance, payment_status_label
 from utils import ROOM_DEPENDENCIES, calculate_revenue, clear_booked_dates_cache, get_optimal_room_combinations
 
 router = Router()
@@ -58,12 +58,12 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext):
         "new": "🟡 Ожидает подтверждения администратора",
         "pending": "🟡 Ожидает подтверждения",
         "awaiting_payment": "💰 Ожидает оплаты",
+        "awaiting_payment_confirmation": "📸 Ожидает подтверждения оплаты",
         "paid": "🟢 Оплачено, ждём в гости",
         "awaiting_cancellation": "⛔ Ожидает отмены",
     }
 
     for idx, booking in enumerate(bookings):
-        status = status_labels.get(booking.status, booking.status)
         children_beds = get_children_beds(booking)
         children_needing_beds = sum(children_beds)
         total_people = booking.adults + children_needing_beds
@@ -71,6 +71,7 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext):
             booking.room_type, total_people, booking.date_from, booking.date_to
         )
         balance = calculate_booking_balance(booking, calculated_total)
+        status = payment_status_label(balance) or status_labels.get(booking.status, booking.status)
         text = (
             f"📌 Заявка #{booking.id}\n"
             f"🏠 Номер: {room_type_names[booking.room_type]}\n"

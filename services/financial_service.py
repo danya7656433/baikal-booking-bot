@@ -43,6 +43,14 @@ def apply_confirmed_payment(booking, paid_amount: int, calculated_total: int) ->
     return calculate_booking_balance(booking, calculated_total)
 
 
+def payment_status_label(balance: dict[str, int]) -> str | None:
+    if balance["paid"] <= 0:
+        return None
+    if balance["remaining"] > 0:
+        return "🟠 Оплачено частично"
+    return "🟢 Оплачено"
+
+
 def financial_totals(bookings: Iterable, calculated_totals: Iterable[int]) -> dict[str, int]:
     result = {
         "billed": 0,

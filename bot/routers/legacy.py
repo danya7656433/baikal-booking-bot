@@ -114,7 +114,7 @@ from bot.keyboards import (
 from bot.states import BookingStates
 from services.availability_service import get_available_room_options, is_available_for_duration
 from services.booking_service import get_children_beds, get_duration_text
-from services.financial_service import apply_confirmed_payment, calculate_booking_balance
+from services.financial_service import apply_confirmed_payment, calculate_booking_balance, payment_status_label
 from services.paths import BACKUP_DIR, DATABASE_PATH, LOG_PATH
 from services.draft_service import clear_booking_draft, get_booking_draft, save_booking_draft
 from utils import ROOM_DEPENDENCIES
@@ -4497,7 +4497,10 @@ async def admin_update_payment_from_card(callback: CallbackQuery, state: FSMCont
         f"Сейчас внесено: {booking.paid_amount or 0}₽\n\n"
         "Введите новую общую внесённую сумму.\n"
         "Пример: 15000",
-        reply_markup=admin_menu_keyboard(),
+        reply_markup=ForceReply(
+            selective=True,
+            input_field_placeholder=f"Сумма оплаты заявки #{booking_id}",
+        ),
     )
     await state.set_state(BookingStates.waiting_for_admin_payment_update)
     await callback.answer()
@@ -4567,7 +4570,7 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
         f"💰 Итого: {total}₽\n"
         f"✅ Внесено: {paid}₽\n"
         f"🧾 Осталось: {remaining}₽\n"
-        f"📍 Статус: {BOOKING_STATUS_LABELS.get(booking.status, booking.status)}",
+        f"📍 Статус: {payment_status_label(balance) or BOOKING_STATUS_LABELS.get(booking.status, booking.status)}",
         reply_markup=admin_menu_keyboard(),
     )
 
@@ -7662,6 +7665,18 @@ async def recover_admin_payment_amount_from_reply(message: Message, state: FSMCo
 
     reply = message.reply_to_message
     prompt_text = ((reply.text or reply.caption) if reply else "") or ""
+    payment_update_match = re.search(r"Заявка\s+#(\d+)", prompt_text, re.IGNORECASE)
+    if payment_update_match and "новую общую внесённую сумму" in prompt_text.lower():
+        booking_id = int(payment_update_match.group(1))
+        logging.warning(
+            "Recovered lost admin payment update state for booking #%s",
+            booking_id,
+        )
+        await state.update_data(admin_payment_booking_id=booking_id)
+        await state.set_state(BookingStates.waiting_for_admin_payment_update)
+        await process_admin_payment_update(message, state)
+        return
+
     match = re.search(r"Чек заявки\s+#(\d+)", prompt_text, re.IGNORECASE)
     if not match or "фактически поступила" not in prompt_text.lower():
         await handle_text_out_of_context(message, state)
@@ -8354,7 +8369,7 @@ async def send_admin_booking_cards(target_message, bookings, empty_text: str):
         total = balance["total"]
         paid = balance["paid"]
         remaining = balance["remaining"]
-        status_text = BOOKING_STATUS_LABELS.get(booking.status, booking.status)
+        status_text = payment_status_label(balance) or BOOKING_STATUS_LABELS.get(booking.status, booking.status)
         text = (
             f"📌 Заявка #{booking.id}\n"
             f"👤 Клиент: {booking.full_name or 'не указан'} (@{booking.username or 'без ника'})\n"
