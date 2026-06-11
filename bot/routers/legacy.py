@@ -4554,6 +4554,7 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
         )
     )
     session.commit()
+    session.expire_all()
     await state.clear()
     if booking.user_id:
         await message.bot.send_message(
@@ -8061,6 +8062,7 @@ async def process_admin_payment_confirmation_amount(
         )
     )
     session.commit()
+    session.expire_all()
     clear_booked_dates_cache()
     await state.clear()
 
@@ -8362,6 +8364,7 @@ async def send_admin_booking_cards(target_message, bookings, empty_text: str):
         )
         return
     for booking in bookings[:20]:
+        session.refresh(booking)
         children_beds = get_children_beds(booking)
         total_people = booking.adults + sum(children_beds)
         calculated_total = await calculate_revenue(booking.room_type, total_people, booking.date_from, booking.date_to)

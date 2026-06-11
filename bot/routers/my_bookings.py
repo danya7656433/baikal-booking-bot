@@ -20,6 +20,7 @@ router = Router()
 @router.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
+    session.expire_all()
     bookings = (
         session.query(Booking)
         .filter(

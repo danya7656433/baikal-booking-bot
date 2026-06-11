@@ -129,6 +129,7 @@ async def admin_finance_update(message: Message, state: FSMContext):
         booking.payment_deadline = None
     session.add(AdminLog(admin_id=message.from_user.id, booking_id=booking.id, action=f"Изменил финансы: {message.text}"))
     session.commit()
+    session.expire_all()
     if action == "внесено" and booking.user_id:
         await message.bot.send_message(
             booking.user_id,
