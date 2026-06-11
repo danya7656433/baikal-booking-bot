@@ -14,7 +14,7 @@ MISSING_COLUMNS = {
         "paid_amount": "INTEGER",
         "payment_method": "VARCHAR",
         "prepayment_type": "VARCHAR DEFAULT 'percent'",
-        "prepayment_value": "INTEGER DEFAULT 30",
+        "prepayment_value": "INTEGER DEFAULT 50",
         "discount_amount": "INTEGER DEFAULT 0",
         "extra_services_amount": "INTEGER DEFAULT 0",
         "refund_amount": "INTEGER DEFAULT 0",

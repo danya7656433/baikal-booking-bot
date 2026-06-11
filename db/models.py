@@ -62,7 +62,7 @@ class Booking(Base):
     paid_amount = Column(Integer, nullable=True)
     payment_method = Column(String, nullable=True)
     prepayment_type = Column(String, default="percent")
-    prepayment_value = Column(Integer, default=30)
+    prepayment_value = Column(Integer, default=50)
     discount_amount = Column(Integer, default=0)
     extra_services_amount = Column(Integer, default=0)
     refund_amount = Column(Integer, default=0)

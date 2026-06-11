@@ -27,7 +27,7 @@ from services.backup_service import (
     restore_database_backup,
 )
 from services.booking_service import get_booking_people_count
-from services.financial_service import calculate_booking_balance
+from services.financial_service import apply_confirmed_payment, calculate_booking_balance
 from services.health_service import build_health_report
 from services.pricing_service import calculate_revenue
 from services.report_service import (
@@ -120,15 +120,22 @@ async def admin_finance_update(message: Message, state: FSMContext):
         booking.date_from,
         booking.date_to,
     )
-    balance = calculate_booking_balance(booking, calculated)
+    balance = (
+        apply_confirmed_payment(booking, value, calculated)
+        if action == "внесено"
+        else calculate_booking_balance(booking, calculated)
+    )
     if action == "внесено":
-        if balance["remaining"] == 0:
-            booking.status = BookingStatus.PAID.value
-            booking.payment_deadline = None
-        elif booking.status == BookingStatus.PAID.value:
-            booking.status = BookingStatus.AWAITING_PAYMENT.value
+        booking.payment_deadline = None
     session.add(AdminLog(admin_id=message.from_user.id, booking_id=booking.id, action=f"Изменил финансы: {message.text}"))
     session.commit()
+    if action == "внесено" and booking.user_id:
+        await message.bot.send_message(
+            booking.user_id,
+            f"💳 Оплата по заявке #{booking.id} обновлена.\n"
+            f"✅ Внесено: {balance['paid']}₽\n"
+            f"🧾 Осталось оплатить: {balance['remaining']}₽",
+        )
     await message.answer(
         f"✅ Финансы заявки #{booking.id} обновлены\n\n"
         f"💰 Итого: {balance['total']}₽\n"

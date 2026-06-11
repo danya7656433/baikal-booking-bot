@@ -7,10 +7,10 @@ def _money(value) -> int:
 
 def calculate_required_prepayment(booking, total: int) -> int:
     total = _money(total)
-    value = _money(getattr(booking, "prepayment_value", 30))
+    value = _money(getattr(booking, "prepayment_value", 50))
     if getattr(booking, "prepayment_type", "percent") == "fixed":
         return min(value, total)
-    percent = min(value, 100)
+    percent = min(max(value, 50), 100)
     return min(round(total * percent / 100), total)
 
 

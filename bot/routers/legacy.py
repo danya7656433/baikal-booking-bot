@@ -7655,6 +7655,29 @@ async def reject_cancel_command(message: Message):
 
 
 @router.message(F.text, StateFilter(None))
+async def recover_admin_payment_amount_from_reply(message: Message, state: FSMContext):
+    if str(message.from_user.id) != str(ADMIN_CHAT_ID):
+        await handle_text_out_of_context(message, state)
+        return
+
+    reply = message.reply_to_message
+    prompt_text = ((reply.text or reply.caption) if reply else "") or ""
+    match = re.search(r"Чек заявки\s+#(\d+)", prompt_text, re.IGNORECASE)
+    if not match or "фактически поступила" not in prompt_text.lower():
+        await handle_text_out_of_context(message, state)
+        return
+
+    booking_id = int(match.group(1))
+    logging.warning(
+        "Recovered lost admin payment amount state for booking #%s",
+        booking_id,
+    )
+    await state.update_data(admin_confirm_payment_booking_id=booking_id)
+    await state.set_state(BookingStates.waiting_for_admin_payment_confirmation_amount)
+    await process_admin_payment_confirmation_amount(message, state, message.bot)
+
+
+@router.message(F.text, StateFilter(None))
 async def handle_text_out_of_context(message: Message, state: FSMContext):
     user_id = message.from_user.id
     current_state = await state.get_state()
@@ -7971,7 +7994,11 @@ async def mark_paid_callback(callback: CallbackQuery, bot: Bot, state: FSMContex
         await callback.message.answer(
             f"💳 Чек заявки #{booking.id}\n\n"
             "Введите сумму, которая фактически поступила.\n"
-            "Например: 10000"
+            "Например: 10000",
+            reply_markup=ForceReply(
+                selective=True,
+                input_field_placeholder=f"Сумма оплаты заявки #{booking.id}",
+            ),
         )
         await callback.answer()
     except ValueError:
@@ -9712,11 +9739,15 @@ async def confirm_booking_callback(callback: types.CallbackQuery, state: FSMCont
                 total_price = await calculate_revenue(
                     booking.room_type, total_people, booking.date_from, booking.date_to
                 )
+                balance = calculate_booking_balance(booking, total_price)
                 await callback.message.bot.send_message(
                     chat_id=booking.user_id,
                     text=(
                         f"✅ Ваша заявка #{booking.id} подтверждена!\n"
-                        f"💰 Сумма к оплате: {total_price}₽\n"
+                        f"💰 Итоговая сумма: {balance['total']}₽\n"
+                        f"🔐 Минимальная предоплата 50%: {balance['required_prepayment']}₽\n"
+                        f"✅ Можно оплатить всю сумму сразу: {balance['total']}₽\n"
+                        f"🧾 При частичной оплате остаток оплачивается по приезду.\n\n"
                         f"Реквизиты для оплаты: Сбербанк 2202206350763830\n"
                         f"⏰ На оплату у вас есть {PAYMENT_DEADLINE_HOURS} часа — до {booking.payment_deadline.strftime('%d.%m.%Y %H:%M')}.\n"
                         f"После оплаты отправьте скриншот чека."
