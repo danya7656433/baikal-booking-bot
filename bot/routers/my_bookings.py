@@ -30,6 +30,7 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext):
             .order_by(Booking.created_at.asc())
             .all()
         )
+        db_session.expunge_all()
 
     await state.update_data(previous_menu="main_menu")
     if not bookings:
