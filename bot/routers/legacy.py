@@ -114,7 +114,7 @@ from bot.keyboards import (
 from bot.states import BookingStates
 from services.availability_service import get_available_room_options, is_available_for_duration
 from services.booking_service import get_children_beds, get_duration_text
-from services.financial_service import calculate_booking_balance
+from services.financial_service import apply_confirmed_payment, calculate_booking_balance
 from services.paths import BACKUP_DIR, DATABASE_PATH, LOG_PATH
 from services.draft_service import clear_booking_draft, get_booking_draft, save_booking_draft
 from utils import ROOM_DEPENDENCIES
@@ -4536,15 +4536,9 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
         booking.date_from,
         booking.date_to,
     )
-    booking.paid_amount = paid
-    balance = calculate_booking_balance(booking, calculated_total)
+    balance = apply_confirmed_payment(booking, paid, calculated_total)
     total = balance["total"]
     remaining = balance["remaining"]
-    if remaining == 0:
-        booking.status = BookingStatus.PAID.value
-        booking.payment_deadline = None
-    elif booking.status == BookingStatus.PAID.value:
-        booking.status = BookingStatus.AWAITING_PAYMENT.value
     booking.admin_comment = (
         f"{booking.admin_comment or ''}\n"
         f"Оплата обновлена администратором. Внесено: {paid}₽. Осталось: {remaining}₽."
@@ -4558,6 +4552,16 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
     )
     session.commit()
     await state.clear()
+    if booking.user_id:
+        await message.bot.send_message(
+            booking.user_id,
+            (
+                f"💳 Оплата по заявке #{booking.id} обновлена администратором.\n\n"
+                f"💰 Общая сумма: {total}₽\n"
+                f"✅ Внесено: {paid}₽\n"
+                f"🧾 Осталось оплатить: {remaining}₽"
+            ),
+        )
     await message.answer(
         f"✅ Оплата заявки #{booking.id} обновлена\n\n"
         f"💰 Итого: {total}₽\n"
@@ -7926,47 +7930,13 @@ async def mark_paid_callback(callback: CallbackQuery, bot: Bot, state: FSMContex
         if not booking:
             await callback.answer(f"Заявка #{booking_id} не найдена.", show_alert=True)
             return
-        booking.status = BookingStatus.PAID.value
-        booking.payment_deadline = None  # Сбрасываем deadline
-        session.commit()
-        clear_booked_dates_cache()
-        children_beds = get_children_beds(booking)
-        children_needing_beds = sum(children_beds)
-        total_people = booking.adults + children_needing_beds
-        total_price = await calculate_revenue(
-            booking.room_type, total_people, booking.date_from, booking.date_to
-        )
-        try:
-            if booking.user_id:
-                await bot.send_message(
-                    chat_id=booking.user_id,
-                    text=(
-                        f"🎉 Оплата за заявку #{booking.id} получена!\n"
-                        f"Ждём вас {booking.date_from.strftime('%d.%m.%Y')} после 14:00!\n\n"
-                        f"🏠 **Адрес**: {HOTEL_ADDRESS}\n"
-                        f"📞 **Для связи**: {ADMIN_CONTACT}\n"
-                        f"🗺 **Местоположение**: {LOCATION_LINK}"
-                    ),
-                    parse_mode="Markdown",
-                )
-        except Exception as e:
-            await callback.message.answer(
-                f"❗ Ошибка при уведомлении пользователя: {e}"
-            )
         await callback.message.edit_reply_markup(reply_markup=None)
+        await state.update_data(admin_confirm_payment_booking_id=booking.id)
+        await state.set_state(BookingStates.waiting_for_admin_payment_confirmation_amount)
         await callback.message.answer(
-            f"Заявка #{booking.id} отмечена как оплаченная 💸"
-        )
-        session.add(
-            AdminLog(
-                admin_id=callback.from_user.id,
-                action=f"Отметил оплату для заявки #{booking_id}, сумма {total_price}₽, {total_people} человек",
-                booking_id=booking_id,
-            )
-        )
-        session.commit()
-        logging.info(
-            f"Заявка #{booking.id} подтверждена как оплаченная, сумма {total_price}₽, {total_people} человек, пользователь {booking.user_id}"
+            f"💳 Чек заявки #{booking.id}\n\n"
+            "Введите сумму, которая фактически поступила.\n"
+            "Например: 10000"
         )
         await callback.answer()
     except ValueError:
@@ -7979,6 +7949,67 @@ async def mark_paid_callback(callback: CallbackQuery, bot: Bot, state: FSMContex
             f"Ошибка в mark_paid_callback: {str(e)}\n{traceback.format_exc()}"
         )
         await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
+
+
+@router.message(BookingStates.waiting_for_admin_payment_confirmation_amount, F.text)
+async def process_admin_payment_confirmation_amount(
+    message: Message, state: FSMContext, bot: Bot
+):
+    if str(message.from_user.id) != str(ADMIN_CHAT_ID):
+        return
+    data = await state.get_data()
+    booking_id = data.get("admin_confirm_payment_booking_id")
+    numbers = re.findall(r"\d+", message.text or "")
+    if not booking_id or not numbers or int(numbers[0]) <= 0:
+        await message.answer("Введите полученную сумму числом. Например: 10000")
+        return
+
+    booking = session.query(Booking).filter_by(id=int(booking_id)).first()
+    if not booking:
+        await state.clear()
+        await message.answer(f"Заявка #{booking_id} не найдена.")
+        return
+
+    paid = int(numbers[0])
+    total_people = booking.adults + sum(get_children_beds(booking))
+    calculated_total = await calculate_revenue(
+        booking.room_type, total_people, booking.date_from, booking.date_to
+    )
+    balance = apply_confirmed_payment(booking, paid, calculated_total)
+    session.add(
+        AdminLog(
+            admin_id=message.from_user.id,
+            action=f"Подтвердил оплату заявки #{booking.id}: внесено {paid}₽",
+            booking_id=booking.id,
+        )
+    )
+    session.commit()
+    clear_booked_dates_cache()
+    await state.clear()
+
+    remaining_text = (
+        f"\n🧾 Осталось оплатить: {balance['remaining']}₽"
+        if balance["remaining"] > 0
+        else "\n✅ Оплачено полностью"
+    )
+    if booking.user_id:
+        await bot.send_message(
+            booking.user_id,
+            (
+                f"✅ Оплата по заявке #{booking.id} подтверждена!\n"
+                f"💰 Общая сумма: {balance['total']}₽\n"
+                f"✅ Внесено: {balance['paid']}₽"
+                f"{remaining_text}\n\n"
+                f"Ждём вас {booking.date_from.strftime('%d.%m.%Y')} после 14:00."
+            ),
+        )
+    await message.answer(
+        f"✅ Оплата заявки #{booking.id} подтверждена\n\n"
+        f"💰 Общая сумма: {balance['total']}₽\n"
+        f"✅ Внесено: {balance['paid']}₽"
+        f"{remaining_text}",
+        reply_markup=admin_menu_keyboard(),
+    )
 
 
 @router.callback_query(F.data.regexp(r"admin_confirm_cancel_(\d+)"))

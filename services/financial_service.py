@@ -36,6 +36,13 @@ def calculate_booking_balance(booking, calculated_total: int) -> dict[str, int]:
     }
 
 
+def apply_confirmed_payment(booking, paid_amount: int, calculated_total: int) -> dict[str, int]:
+    booking.paid_amount = _money(paid_amount)
+    booking.status = "paid"
+    booking.payment_deadline = None
+    return calculate_booking_balance(booking, calculated_total)
+
+
 def financial_totals(bookings: Iterable, calculated_totals: Iterable[int]) -> dict[str, int]:
     result = {
         "billed": 0,

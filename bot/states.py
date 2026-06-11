@@ -15,6 +15,7 @@ class BookingStates(StatesGroup):
     waiting_for_cancellation_reason = State()
     waiting_for_support_message = State()
     waiting_for_payment_screenshot = State()
+    waiting_for_admin_payment_confirmation_amount = State()
     viewing_photos = State()
     waiting_for_manual_contact = State()
     waiting_for_price_change_dates = State()

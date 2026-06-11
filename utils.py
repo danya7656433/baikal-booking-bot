@@ -34,6 +34,7 @@ import os
 import json
 from dotenv import load_dotenv
 from services.backup_service import create_database_backup
+from services.financial_service import calculate_booking_balance
 from pytz import timezone
 
 try:
@@ -478,9 +479,23 @@ async def schedule_reminders(bot: Bot):
                         continue
 
                     day_text = {7: "через 7 дней", 3: "через 3 дня", 1: "завтра"}[days_before]
+                    total_people = booking.adults + sum(get_children_beds(booking))
+                    calculated_total = await calculate_revenue(
+                        booking.room_type,
+                        total_people,
+                        booking.date_from,
+                        booking.date_to,
+                    )
+                    balance = calculate_booking_balance(booking, calculated_total)
+                    remaining_text = (
+                        f"\n🧾 Остаток к оплате: {balance['remaining']}₽"
+                        if balance["remaining"] > 0
+                        else "\n✅ Оплачено полностью"
+                    )
                     guest_text = (
                         f"📅 Напоминаем: ваш заезд по заявке #{booking.id} {day_text}, "
                         f"{booking.date_from.strftime('%d.%m.%Y')} после 14:00."
+                        f"{remaining_text}"
                     )
                     admin_text = (
                         f"📅 Заезд {day_text}: заявка #{booking.id}\n"
@@ -488,6 +503,7 @@ async def schedule_reminders(bot: Bot):
                         f"Телефон: {booking.phone}\n"
                         f"Номер: {room_type_names.get(booking.room_type, booking.room_type)}\n"
                         f"Даты: {booking.date_from.strftime('%d.%m.%Y')} - {booking.date_to.strftime('%d.%m.%Y')}"
+                        f"{remaining_text}"
                     )
                     try:
                         await bot.send_message(booking.user_id, guest_text)
