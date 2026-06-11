@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.states import BookingStates
 from config import ACTIVE_BOOKING_STATUSES, BookingStatus, room_type_names
-from database import Booking, BookingHistory, session
+from database import Booking, BookingHistory, get_session, session
 from services.booking_service import get_children_beds
 from services.financial_service import calculate_booking_balance, payment_status_label
 from utils import ROOM_DEPENDENCIES, calculate_revenue, clear_booked_dates_cache, get_optimal_room_combinations
@@ -20,16 +20,16 @@ router = Router()
 @router.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    session.expire_all()
-    bookings = (
-        session.query(Booking)
-        .filter(
-            Booking.user_id == user_id,
-            Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+    with get_session() as db_session:
+        bookings = (
+            db_session.query(Booking)
+            .filter(
+                Booking.user_id == user_id,
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+            )
+            .order_by(Booking.created_at.asc())
+            .all()
         )
-        .order_by(Booking.created_at.asc())
-        .all()
-    )
 
     await state.update_data(previous_menu="main_menu")
     if not bookings:
