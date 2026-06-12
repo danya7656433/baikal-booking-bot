@@ -8055,27 +8055,41 @@ async def process_admin_payment_confirmation_amount(
         await message.answer("Введите полученную сумму числом. Например: 10000")
         return
 
-    booking = session.query(Booking).filter_by(id=int(booking_id)).first()
-    if not booking:
-        await state.clear()
-        await message.answer(f"Заявка #{booking_id} не найдена.")
-        return
-
     paid = int(numbers[0])
-    total_people = booking.adults + sum(get_children_beds(booking))
-    calculated_total = await calculate_revenue(
-        booking.room_type, total_people, booking.date_from, booking.date_to
-    )
-    balance = apply_confirmed_payment(booking, paid, calculated_total)
-    session.add(
-        AdminLog(
-            admin_id=message.from_user.id,
-            action=f"Подтвердил оплату заявки #{booking.id}: внесено {paid}₽",
-            booking_id=booking.id,
+    booking_id = int(booking_id)
+    with get_session() as db_session:
+        booking = db_session.query(Booking).filter_by(id=booking_id).first()
+        if not booking:
+            await state.clear()
+            await message.answer(f"Заявка #{booking_id} не найдена.")
+            return
+
+        total_people = booking.adults + sum(get_children_beds(booking))
+        calculated_total = await calculate_revenue(
+            booking.room_type, total_people, booking.date_from, booking.date_to
         )
-    )
-    session.commit()
-    session.expire_all()
+        balance = apply_confirmed_payment(booking, paid, calculated_total)
+        db_session.add(
+            AdminLog(
+                admin_id=message.from_user.id,
+                action=f"Подтвердил оплату заявки #{booking.id}: внесено {paid}₽",
+                booking_id=booking.id,
+            )
+        )
+        booking_user_id = booking.user_id
+        booking_date_from = booking.date_from
+
+    with get_session() as verify_session:
+        saved_booking = verify_session.query(Booking).filter_by(id=booking_id).first()
+        if not saved_booking or saved_booking.paid_amount != paid or saved_booking.status != BookingStatus.PAID.value:
+            raise RuntimeError(f"Payment confirmation verification failed for booking #{booking_id}")
+        logging.info(
+            "Confirmed payment persisted for booking #%s: paid=%s, status=%s",
+            booking_id,
+            saved_booking.paid_amount,
+            saved_booking.status,
+        )
+
     clear_booked_dates_cache()
     await state.clear()
 
@@ -8084,19 +8098,19 @@ async def process_admin_payment_confirmation_amount(
         if balance["remaining"] > 0
         else "\n✅ Оплачено полностью"
     )
-    if booking.user_id:
+    if booking_user_id:
         await bot.send_message(
-            booking.user_id,
+            booking_user_id,
             (
-                f"✅ Оплата по заявке #{booking.id} подтверждена!\n"
+                f"✅ Оплата по заявке #{booking_id} подтверждена!\n"
                 f"💰 Общая сумма: {balance['total']}₽\n"
                 f"✅ Внесено: {balance['paid']}₽"
                 f"{remaining_text}\n\n"
-                f"Ждём вас {booking.date_from.strftime('%d.%m.%Y')} после 14:00."
+                f"Ждём вас {booking_date_from.strftime('%d.%m.%Y')} после 14:00."
             ),
         )
     await message.answer(
-        f"✅ Оплата заявки #{booking.id} подтверждена\n\n"
+        f"✅ Оплата заявки #{booking_id} подтверждена\n\n"
         f"💰 Общая сумма: {balance['total']}₽\n"
         f"✅ Внесено: {balance['paid']}₽"
         f"{remaining_text}",
