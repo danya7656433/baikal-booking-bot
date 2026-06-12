@@ -52,6 +52,10 @@ class ReliableCoreMigrationsTest(unittest.TestCase):
                 "stay_status_changed_at",
             }.issubset(booking_columns)
         )
+        notification_columns = {
+            column["name"] for column in inspector.get_columns("notification_logs")
+        }
+        self.assertTrue({"recipient", "dedupe_key"}.issubset(notification_columns))
         self.assertTrue(
             {"payment_transactions", "booking_changes", "error_events"}.issubset(
                 inspector.get_table_names()

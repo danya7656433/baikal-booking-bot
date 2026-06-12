@@ -7,6 +7,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
 from config import ADMIN_CHAT_ID
+from services.error_monitor_service import record_error
 
 
 class TelegramHandler(logging.Handler):
@@ -23,12 +24,11 @@ class TelegramHandler(logging.Handler):
             if self._sending:
                 return
             log_message = self.format(record)
-            current_time = time.time()
-            if (
-                log_message == self.last_message
-                and current_time - self.last_sent < self.rate_limit_seconds
-            ):
+            exc = record.exc_info[1] if record.exc_info else RuntimeError(record.getMessage())
+            result = record_error(exc, log_message)
+            if not result["first"]:
                 return
+            current_time = time.time()
             if len(log_message) > 4096:
                 log_message = log_message[:4000] + "... (truncated)"
             self._sending = True

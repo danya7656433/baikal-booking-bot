@@ -213,6 +213,8 @@ class NotificationLog(Base):
     booking_id = Column(Integer)
     kind = Column(String)
     days_before = Column(Integer, nullable=True)
+    recipient = Column(String, nullable=True)
+    dedupe_key = Column(String, unique=True, nullable=True)
     sent_at = Column(DateTime, default=datetime.now)
 
 

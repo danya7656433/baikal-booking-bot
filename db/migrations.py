@@ -29,6 +29,10 @@ MISSING_COLUMNS = {
     "support_tickets": {
         "user_message_id": "INTEGER",
     },
+    "notification_logs": {
+        "recipient": "VARCHAR",
+        "dedupe_key": "VARCHAR",
+    },
 }
 
 
@@ -60,6 +64,13 @@ def run_migrations():
                 text(
                     "UPDATE bookings SET calculated_total = manual_total "
                     "WHERE calculated_total IS NULL AND manual_total IS NOT NULL"
+                )
+            )
+        if "notification_logs" in existing_tables:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "ix_notification_logs_dedupe_key ON notification_logs (dedupe_key)"
                 )
             )
             connection.execute(

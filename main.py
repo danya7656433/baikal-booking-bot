@@ -12,6 +12,9 @@ from db.migrations import run_migrations
 from handlers import register_handlers
 from services.backup_service import backup_database
 from services.notification_service import TelegramHandler
+from services.booking_notification_service import schedule_booking_notifications
+from services.daily_summary_service import schedule_daily_summary
+from services.error_monitor_service import flush_error_summaries
 from services.paths import LOCK_PATH, LOG_PATH
 
 load_dotenv()
@@ -95,14 +98,15 @@ async def main():
     register_handlers(dp, bot)
 
     try:
-        from utils import check_support_timeouts, schedule_reminders, schedule_reviews
+        from utils import check_support_timeouts
         from services.stay_service import schedule_stay_transitions
 
-        asyncio.create_task(schedule_reminders(bot))
+        asyncio.create_task(schedule_booking_notifications(bot))
         asyncio.create_task(schedule_backups())
-        asyncio.create_task(schedule_reviews(bot))
         asyncio.create_task(check_support_timeouts(bot))
         asyncio.create_task(schedule_stay_transitions())
+        asyncio.create_task(schedule_daily_summary(bot))
+        asyncio.create_task(flush_error_summaries(bot))
         logging.info("Background tasks registered")
     except ImportError:
         logging.exception("Failed to register background tasks")
