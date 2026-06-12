@@ -21,12 +21,10 @@ class TelegramHandler(logging.Handler):
 
     def emit(self, record):
         try:
-            if self._sending:
-                return
             log_message = self.format(record)
             exc = record.exc_info[1] if record.exc_info else RuntimeError(record.getMessage())
             result = record_error(exc, log_message)
-            if not result["first"]:
+            if not result["first"] or self._sending:
                 return
             current_time = time.time()
             if len(log_message) > 4096:

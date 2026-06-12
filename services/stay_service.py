@@ -2,7 +2,6 @@ import json
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from config import CANCELLED_BOOKING_STATUSES
 from db import Booking, BookingChange, get_session
 
 IRKUTSK = ZoneInfo("Asia/Irkutsk")
@@ -50,7 +49,7 @@ def apply_due_stay_transitions(now: datetime | None = None) -> list[int]:
     now = now or datetime.now(IRKUTSK)
     changed = []
     with get_session() as db_session:
-        bookings = db_session.query(Booking).filter(~Booking.status.in_(CANCELLED_BOOKING_STATUSES)).all()
+        bookings = db_session.query(Booking).filter(Booking.status.in_(("paid", "completed"))).all()
         for booking in bookings:
             due = calculate_due_stay_status(booking, now)
             current = booking.stay_status or "awaiting_checkin"
