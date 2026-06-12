@@ -20,14 +20,15 @@ from bot.keyboards import (
 )
 from bot.states import BookingStates
 from config import ADMIN_CHAT_ID, BookingStatus
-from database import AdminLog, Booking, BookingYear, User, engine, session
+from database import AdminLog, Booking, BookingYear, User, engine, get_session, session
 from services.backup_service import (
     create_database_backup,
     list_database_backups,
     restore_database_backup,
 )
 from services.booking_service import get_booking_people_count
-from services.financial_service import apply_confirmed_payment, calculate_booking_balance
+from services.financial_service import calculate_required_prepayment
+from services.payment_service import add_adjustment, add_refund, get_payment_balance
 from services.health_service import build_health_report
 from services.pricing_service import calculate_revenue
 from services.report_service import (
@@ -90,55 +91,62 @@ async def admin_finance_update(message: Message, state: FSMContext):
     if len(parts) < 3 or not parts[0].isdigit():
         await message.answer("Не понял команду. Пример: 12 скидка 1000")
         return
-    booking = session.query(Booking).filter_by(id=int(parts[0])).first()
-    if not booking:
-        await message.answer("Заявка не найдена.")
-        return
+    booking_id = int(parts[0])
     action = parts[1]
     numbers = [int(value) for value in re.findall(r"\d+", " ".join(parts[2:]))]
     if not numbers:
         await message.answer("Укажите сумму или процент.")
         return
     value = numbers[-1]
-    if action == "предоплата":
-        booking.prepayment_type = "fixed" if "сумма" in parts else "percent"
-        booking.prepayment_value = value
-    elif action == "скидка":
-        booking.discount_amount = value
-    elif action == "услуги":
-        booking.extra_services_amount = value
-    elif action == "возврат":
-        booking.refund_amount = value
+    with get_session() as db_session:
+        booking = db_session.get(Booking, booking_id)
+        if not booking:
+            await message.answer("Заявка не найдена.")
+            return
+        calculated = await calculate_revenue(
+            booking.room_type,
+            get_booking_people_count(booking),
+            booking.date_from,
+            booking.date_to,
+        )
+        booking.calculated_total = calculated
+        current = get_payment_balance(db_session, booking_id)
+        if action == "предоплата":
+            booking.prepayment_type = "fixed" if "сумма" in parts else "percent"
+            booking.prepayment_value = value
+        elif action == "скидка":
+            booking.discount_amount = value
+        elif action == "услуги":
+            booking.extra_services_amount = value
+        elif action not in {"возврат", "внесено"}:
+            await message.answer("Доступно: предоплата, скидка, услуги, возврат, внесено.")
+            return
+        booking_user_id = booking.user_id
+        db_session.add(AdminLog(admin_id=message.from_user.id, booking_id=booking.id, action=f"Изменил финансы: {message.text}"))
+    if action == "возврат":
+        balance = add_refund(booking_id, value, "администратор", message.from_user.id, message.text)
     elif action == "внесено":
-        booking.paid_amount = value
+        difference = value - current["paid"]
+        balance = add_adjustment(booking_id, difference, message.from_user.id, message.text) if difference else current
+        with get_session() as db_session:
+            booking = db_session.get(Booking, booking_id)
+            booking.status = BookingStatus.PAID.value if balance["net_paid"] else booking.status
+            booking.payment_deadline = None
     else:
-        await message.answer("Доступно: предоплата, скидка, услуги, возврат, внесено.")
-        return
-    calculated = await calculate_revenue(
-        booking.room_type,
-        get_booking_people_count(booking),
-        booking.date_from,
-        booking.date_to,
-    )
-    balance = (
-        apply_confirmed_payment(booking, value, calculated)
-        if action == "внесено"
-        else calculate_booking_balance(booking, calculated)
-    )
-    if action == "внесено":
-        booking.payment_deadline = None
-    session.add(AdminLog(admin_id=message.from_user.id, booking_id=booking.id, action=f"Изменил финансы: {message.text}"))
-    session.commit()
-    session.expire_all()
-    if action == "внесено" and booking.user_id:
+        with get_session() as db_session:
+            balance = get_payment_balance(db_session, booking_id)
+    with get_session() as db_session:
+        booking = db_session.get(Booking, booking_id)
+        balance["required_prepayment"] = calculate_required_prepayment(booking, balance["total"])
+    if action == "внесено" and booking_user_id:
         await message.bot.send_message(
-            booking.user_id,
-            f"💳 Оплата по заявке #{booking.id} обновлена.\n"
+            booking_user_id,
+            f"💳 Оплата по заявке #{booking_id} обновлена.\n"
             f"✅ Внесено: {balance['paid']}₽\n"
             f"🧾 Осталось оплатить: {balance['remaining']}₽",
         )
     await message.answer(
-        f"✅ Финансы заявки #{booking.id} обновлены\n\n"
+        f"✅ Финансы заявки #{booking_id} обновлены\n\n"
         f"💰 Итого: {balance['total']}₽\n"
         f"🔐 Требуемая предоплата: {balance['required_prepayment']}₽\n"
         f"✅ Внесено: {balance['paid']}₽\n"
