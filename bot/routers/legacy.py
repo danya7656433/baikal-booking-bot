@@ -4420,51 +4420,53 @@ async def process_admin_create_payment(message: Message, state: FSMContext):
     people = int(data["admin_create_people"])
     room_type = data["admin_create_room_type"]
     remaining = max(total - paid, 0)
-    status = BookingStatus.PAID.value if remaining == 0 else BookingStatus.AWAITING_PAYMENT.value
-    booking = Booking(
-        user_id=ADMIN_CHAT_ID,
-        username="admin_manual",
-        full_name=data["admin_create_full_name"],
-        phone=data["admin_create_phone"],
-        comment=data.get("admin_create_guest_note", ""),
-        date_from=start_date,
-        date_to=end_date,
-        room_type=room_type,
-        adults=people,
-        children=0,
-        children_beds="[]",
-        status=status,
-        manual_total=total,
-        paid_amount=paid,
-        payment_method=payment_method,
-        admin_comment=(
-            f"Создано администратором. Оплата: {payment_method}. "
-            f"Внесено: {paid}₽. Осталось: {remaining}₽."
-        ),
-    )
-    session.add(booking)
-    session.commit()
-    clear_booked_dates_cache()
-    session.add(
-        AdminLog(
-            admin_id=message.from_user.id,
-            booking_id=booking.id,
-            action=f"Создал ручную заявку #{booking.id}",
+    status = BookingStatus.PAID.value if paid > 0 else BookingStatus.AWAITING_PAYMENT.value
+    with get_session() as db_session:
+        booking = Booking(
+            user_id=None,
+            username="admin_manual",
+            full_name=data["admin_create_full_name"],
+            phone=data["admin_create_phone"],
+            comment=data.get("admin_create_guest_note", ""),
+            date_from=start_date,
+            date_to=end_date,
+            room_type=room_type,
+            adults=people,
+            children=0,
+            children_beds="[]",
+            status=status,
+            manual_total=total,
+            paid_amount=paid,
+            payment_method=payment_method,
+            admin_comment=(
+                f"Создано администратором. Оплата: {payment_method}. "
+                f"Внесено: {paid}₽. Осталось: {remaining}₽."
+            ),
         )
-    )
-    session.commit()
+        db_session.add(booking)
+        db_session.flush()
+        booking_id = booking.id
+        db_session.add(
+            AdminLog(
+                admin_id=message.from_user.id,
+                booking_id=booking_id,
+                action=f"Создал ручную заявку #{booking_id}",
+            )
+        )
+
+    clear_booked_dates_cache()
     await state.clear()
     await message.answer(
-        f"✅ Заявка #{booking.id} создана\n\n"
-        f"👤 {booking.full_name}\n"
-        f"📞 {booking.phone}\n"
+        f"✅ Заявка #{booking_id} создана\n\n"
+        f"👤 {data['admin_create_full_name']}\n"
+        f"📞 {data['admin_create_phone']}\n"
         f"🏠 {room_type_names.get(room_type, room_type)}\n"
         f"📅 {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n"
         f"👥 Гостей: {people}\n"
         f"💰 Итого: {total}₽\n"
         f"✅ Внесли: {paid}₽\n"
         f"🧾 Осталось: {remaining}₽\n"
-        f"📍 Статус: {BOOKING_STATUS_LABELS.get(status, status)}",
+        f"📍 Статус: {payment_status_label({'paid': paid, 'remaining': remaining}) or BOOKING_STATUS_LABELS.get(status, status)}",
         reply_markup=admin_menu_keyboard(),
     )
 
