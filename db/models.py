@@ -66,6 +66,49 @@ class Booking(Base):
     discount_amount = Column(Integer, default=0)
     extra_services_amount = Column(Integer, default=0)
     refund_amount = Column(Integer, default=0)
+    calculated_total = Column(Integer, nullable=True)
+    payment_status = Column(String, nullable=True)
+    stay_status = Column(String, default="awaiting_checkin")
+    stay_status_changed_at = Column(DateTime, nullable=True)
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, nullable=False)
+    amount = Column(Integer, nullable=False)
+    kind = Column(String, nullable=False)
+    payment_method = Column(String, nullable=True)
+    admin_id = Column(Integer, nullable=True)
+    comment = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class BookingChange(Base):
+    __tablename__ = "booking_changes"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, nullable=False)
+    actor_id = Column(Integer, nullable=True)
+    kind = Column(String, nullable=False)
+    before_json = Column(String, nullable=True)
+    after_json = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class ErrorEvent(Base):
+    __tablename__ = "error_events"
+
+    id = Column(Integer, primary_key=True)
+    fingerprint = Column(String, unique=True, nullable=False)
+    message = Column(String, nullable=False)
+    traceback_preview = Column(String, nullable=True)
+    first_seen_at = Column(DateTime, default=datetime.now)
+    last_seen_at = Column(DateTime, default=datetime.now)
+    total_count = Column(Integer, default=1)
+    reported_count = Column(Integer, default=0)
+    last_summary_at = Column(DateTime, nullable=True)
 
 
 class BookingDraft(Base):

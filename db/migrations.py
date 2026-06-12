@@ -18,6 +18,10 @@ MISSING_COLUMNS = {
         "discount_amount": "INTEGER DEFAULT 0",
         "extra_services_amount": "INTEGER DEFAULT 0",
         "refund_amount": "INTEGER DEFAULT 0",
+        "calculated_total": "INTEGER",
+        "payment_status": "VARCHAR",
+        "stay_status": "VARCHAR DEFAULT 'awaiting_checkin'",
+        "stay_status_changed_at": "DATETIME",
     },
     "news": {
         "video_id": "VARCHAR",
@@ -50,3 +54,17 @@ def run_migrations():
                     )
                 )
                 logging.info("Migration added column %s.%s", table_name, column_name)
+
+        if "bookings" in existing_tables:
+            connection.execute(
+                text(
+                    "UPDATE bookings SET calculated_total = manual_total "
+                    "WHERE calculated_total IS NULL AND manual_total IS NOT NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE bookings SET stay_status = 'awaiting_checkin' "
+                    "WHERE stay_status IS NULL"
+                )
+            )
