@@ -7,7 +7,9 @@ from sqlalchemy.exc import IntegrityError
 
 from config import ADMIN_CHAT_ID
 from db import Booking, NotificationLog, get_session
+from services.booking_service import get_booking_people_count
 from services.payment_service import get_payment_balance
+from services.pricing_service import calculate_revenue
 from services.stay_service import set_stay_status
 
 IRKUTSK = ZoneInfo("Asia/Irkutsk")
@@ -51,6 +53,14 @@ async def process_booking_notifications(bot, today=None) -> int:
     today = today or datetime.now(IRKUTSK).date()
     with get_session() as db_session:
         bookings = db_session.query(Booking).filter(Booking.status == "paid").all()
+        for booking in bookings:
+            if booking.calculated_total is None:
+                booking.calculated_total = await calculate_revenue(
+                    booking.room_type,
+                    get_booking_people_count(booking),
+                    booking.date_from,
+                    booking.date_to,
+                )
         snapshots = [(b.id, b.user_id, b.full_name, b.date_from, b.date_to, _balance_text(db_session, b.id)) for b in bookings]
     sent = 0
     for booking_id, user_id, full_name, date_from, date_to, balance_text in snapshots:
