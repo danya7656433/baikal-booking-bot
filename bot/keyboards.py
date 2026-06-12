@@ -159,3 +159,23 @@ def admin_booking_actions(booking_id: int) -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def admin_payment_method_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="💳 Перевод"), KeyboardButton(text="💵 Наличные")],
+            [KeyboardButton(text="🧾 Другое")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def admin_payment_confirm_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="⚠️ Подтвердить переплату")],
+            [KeyboardButton(text="❌ Отмена")],
+        ],
+        resize_keyboard=True,
+    )

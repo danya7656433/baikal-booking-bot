@@ -115,7 +115,9 @@ from bot.keyboards import (
 from bot.states import BookingStates
 from services.availability_service import get_available_room_options, is_available_for_duration
 from services.booking_service import get_children_beds, get_duration_text
+from services.booking_card_service import build_booking_card_data, format_admin_booking_card
 from services.financial_service import apply_confirmed_payment, calculate_booking_balance, payment_status_label
+from services.payment_service import add_adjustment, add_payment, get_payment_balance
 from services.paths import BACKUP_DIR, DATABASE_PATH, LOG_PATH
 from services.draft_service import clear_booking_draft, get_booking_draft, save_booking_draft
 from utils import ROOM_DEPENDENCIES
@@ -4543,12 +4545,12 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
             booking.date_from,
             booking.date_to,
         )
-        balance = apply_confirmed_payment(booking, paid, calculated_total)
-        total = balance["total"]
-        remaining = balance["remaining"]
+        booking.calculated_total = calculated_total
+        current_balance = get_payment_balance(db_session, booking_id)
+        difference = paid - current_balance["paid"]
         booking.admin_comment = (
             f"{booking.admin_comment or ''}\n"
-            f"Оплата обновлена администратором. Внесено: {paid}₽. Осталось: {remaining}₽."
+            f"Внесённая сумма исправлена администратором на {paid}₽."
         ).strip()
         db_session.add(
             AdminLog(
@@ -4558,11 +4560,29 @@ async def process_admin_payment_update(message: Message, state: FSMContext):
             )
         )
         booking_user_id = booking.user_id
+
+    if difference:
+        balance = add_adjustment(
+            booking_id,
+            difference,
+            message.from_user.id,
+            f"Исправление общей внесённой суммы на {paid}₽",
+        )
+    else:
+        with get_session() as db_session:
+            balance = get_payment_balance(db_session, booking_id)
+    total = balance["total"]
+    remaining = balance["remaining"]
+    with get_session() as db_session:
+        booking = db_session.get(Booking, booking_id)
+        if balance["net_paid"] > 0:
+            booking.status = BookingStatus.PAID.value
+            booking.payment_deadline = None
         booking_status = booking.status
 
     with get_session() as verify_session:
         saved_booking = verify_session.query(Booking).filter_by(id=booking_id).first()
-        if not saved_booking or saved_booking.paid_amount != paid or saved_booking.status != BookingStatus.PAID.value:
+        if not saved_booking or saved_booking.paid_amount != paid:
             raise RuntimeError(f"Payment update verification failed for booking #{booking_id}")
         logging.info(
             "Payment persisted for booking #%s: paid=%s, status=%s",
@@ -8070,7 +8090,7 @@ async def process_admin_payment_confirmation_amount(
         calculated_total = await calculate_revenue(
             booking.room_type, total_people, booking.date_from, booking.date_to
         )
-        balance = apply_confirmed_payment(booking, paid, calculated_total)
+        booking.calculated_total = calculated_total
         db_session.add(
             AdminLog(
                 admin_id=message.from_user.id,
@@ -8081,9 +8101,21 @@ async def process_admin_payment_confirmation_amount(
         booking_user_id = booking.user_id
         booking_date_from = booking.date_from
 
+    balance = add_payment(
+        booking_id,
+        paid,
+        "чек",
+        message.from_user.id,
+        "Подтверждено по скриншоту",
+    )
+    with get_session() as db_session:
+        booking = db_session.get(Booking, booking_id)
+        booking.status = BookingStatus.PAID.value
+        booking.payment_deadline = None
+
     with get_session() as verify_session:
         saved_booking = verify_session.query(Booking).filter_by(id=booking_id).first()
-        if not saved_booking or saved_booking.paid_amount != paid or saved_booking.status != BookingStatus.PAID.value:
+        if not saved_booking or saved_booking.paid_amount != balance["paid"] or saved_booking.status != BookingStatus.PAID.value:
             raise RuntimeError(f"Payment confirmation verification failed for booking #{booking_id}")
         logging.info(
             "Confirmed payment persisted for booking #%s: paid=%s, status=%s",
@@ -8393,42 +8425,15 @@ async def send_admin_booking_cards(target_message, bookings, empty_text: str):
         )
         return
     for booking in bookings[:20]:
-        with get_session() as db_session:
-            booking = db_session.query(Booking).filter_by(id=booking.id).first()
-            if not booking:
-                continue
-            db_session.expunge(booking)
-        children_beds = get_children_beds(booking)
-        total_people = booking.adults + sum(children_beds)
-        calculated_total = await calculate_revenue(booking.room_type, total_people, booking.date_from, booking.date_to)
-        balance = calculate_booking_balance(booking, calculated_total)
-        total = balance["total"]
-        paid = balance["paid"]
-        remaining = balance["remaining"]
-        status_text = payment_status_label(balance) or BOOKING_STATUS_LABELS.get(booking.status, booking.status)
-        text = (
-            f"📌 Заявка #{booking.id}\n"
-            f"👤 Клиент: {booking.full_name or 'не указан'} (@{booking.username or 'без ника'})\n"
-            f"📞 Телефон: {booking.phone or 'не указан'}\n"
-            f"🏠 Номер: {room_type_names.get(booking.room_type, booking.room_type)}\n"
-            f"📅 Даты: {booking.date_from.strftime('%d.%m.%Y')} - {booking.date_to.strftime('%d.%m.%Y')}\n"
-            f"👥 Гости: {total_people} (взрослые: {booking.adults}, дети: {booking.children})\n"
-            f"💰 Сумма: {total}₽\n"
-            f"✅ Внесено: {paid}₽\n"
-            f"🔐 Требуемая предоплата: {balance['required_prepayment']}₽\n"
-            f"↩️ Возвращено: {balance['refunds']}₽\n"
-            f"🧾 Осталось: {remaining}₽\n"
-            f"📍 Статус: {status_text}\n"
-            f"💬 Комментарий: {booking.comment or 'нет'}\n"
-            f"📝 Админ-комментарий: {booking.admin_comment or 'нет'}"
-        )
+        text = format_admin_booking_card(await build_booking_card_data(booking.id))
         await target_message.answer(
             text,
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="Изменить статус", callback_data=f"admin_change_status_{booking.id}")],
                     [InlineKeyboardButton(text="Редактировать", callback_data=f"admin_edit_booking_{booking.id}")],
-                    [InlineKeyboardButton(text="💳 Изменить предоплату", callback_data=f"admin_update_payment_{booking.id}")],
+                    [InlineKeyboardButton(text="➕ Добавить оплату", callback_data=f"admin_add_payment_{booking.id}")],
+                    [InlineKeyboardButton(text="✏️ Исправить внесённую сумму", callback_data=f"admin_update_payment_{booking.id}")],
                 ]
             ),
         )

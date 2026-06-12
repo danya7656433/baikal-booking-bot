@@ -31,7 +31,9 @@ def _total_for(booking: Booking) -> int:
     total = booking.calculated_total
     if total is None:
         total = booking.manual_total
-    return max(int(total or 0), 0)
+    discount = max(int(booking.discount_amount or 0), 0)
+    extra_services = max(int(booking.extra_services_amount or 0), 0)
+    return max(int(total or 0) - discount + extra_services, 0)
 
 
 def _payment_status(total: int, net_paid: int, refunds: int) -> str:

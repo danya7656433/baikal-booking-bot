@@ -159,6 +159,15 @@ class PaymentServiceTest(unittest.TestCase):
         with self.assertRaises(LookupError):
             add_payment(999999, 1000, "перевод", 101)
 
+    def test_balance_includes_discount_and_extra_services(self):
+        with self.Session.begin() as db_session:
+            booking = db_session.get(Booking, self.booking_id)
+            booking.discount_amount = 1000
+            booking.extra_services_amount = 2500
+        with self.Session() as db_session:
+            balance = get_payment_balance(db_session, self.booking_id)
+        self.assertEqual(balance["total"], 11500)
+
     def test_first_new_payment_preserves_legacy_paid_amount(self):
         with self.Session.begin() as db_session:
             booking = db_session.get(Booking, self.booking_id)

@@ -11,6 +11,7 @@ from bot.states import BookingStates
 from config import ACTIVE_BOOKING_STATUSES, BookingStatus, room_type_names
 from database import Booking, BookingHistory, get_session, session
 from services.booking_service import get_children_beds
+from services.booking_card_service import build_booking_card_data, format_guest_booking_card
 from services.financial_service import calculate_booking_balance, payment_status_label
 from utils import ROOM_DEPENDENCIES, calculate_revenue, clear_booked_dates_cache, get_optimal_room_combinations
 
@@ -66,27 +67,7 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext):
     }
 
     for idx, booking in enumerate(bookings):
-        children_beds = get_children_beds(booking)
-        children_needing_beds = sum(children_beds)
-        total_people = booking.adults + children_needing_beds
-        calculated_total = await calculate_revenue(
-            booking.room_type, total_people, booking.date_from, booking.date_to
-        )
-        balance = calculate_booking_balance(booking, calculated_total)
-        status = payment_status_label(balance) or status_labels.get(booking.status, booking.status)
-        text = (
-            f"📌 Заявка #{booking.id}\n"
-            f"🏠 Номер: {room_type_names[booking.room_type]}\n"
-            f"📅 Заезд: {booking.date_from.strftime('%d.%m.%Y')} после 14:00\n"
-            f"📅 Выезд: {booking.date_to.strftime('%d.%m.%Y')} до 12:00\n"
-            f"👨‍👩‍👧‍👦 Всего человек: {total_people} (взрослых: {booking.adults}, "
-            f"детей: {booking.children}, из них {children_needing_beds} с местами)\n"
-            f"💰 Сумма: {balance['total']}₽\n"
-            f"✅ Внесено: {balance['paid']}₽\n"
-            f"🧾 Осталось: {balance['remaining']}₽\n"
-            f"💬 Комментарий: {booking.comment}\n"
-            f"Статус: {status}"
-        )
+        text = format_guest_booking_card(await build_booking_card_data(booking.id))
         buttons = [
             [
                 InlineKeyboardButton(
