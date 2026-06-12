@@ -1,66 +1,65 @@
-# Booking Core Reliability Design
+# Проект надёжного ядра системы бронирования
 
-## Goal
+## Цель
 
-Implement the selected improvements without destabilizing the existing Telegram bot:
+Реализовать утверждённые улучшения без нарушения работы существующего Telegram-бота:
 
-1. Remove global SQLAlchemy session usage from every touched scenario.
-2. Add an immutable payment transaction history.
-3. Add an admin action that appends a payment instead of replacing the total paid.
-4. Add automatic and manually correctable stay statuses.
-5. Use one booking card formatter for guest and admin views.
-6. Warn about overpayments.
-7. Include remaining balances in reminders.
-8. Allow admin date changes with automatic availability checks and price recalculation.
-9. Allow admin accommodation changes with automatic availability checks and price recalculation.
-10. Send a daily admin summary at 09:00 Asia/Irkutsk.
-11. Group repeated critical errors and report their counts every 30 minutes.
-12. Add unit, integration, and end-to-end tests for every changed workflow.
+1. Убрать глобальную SQLAlchemy-сессию из всех изменяемых сценариев.
+2. Добавить неизменяемую историю платёжных операций.
+3. Добавить администратору действие, которое прибавляет новую оплату, а не заменяет внесённую сумму.
+4. Добавить автоматические статусы проживания с возможностью ручной коррекции.
+5. Использовать единый формат карточки заявки для гостя и администратора.
+6. Предупреждать о переплате.
+7. Указывать остаток оплаты в напоминаниях.
+8. Позволить администратору переносить даты с проверкой доступности и пересчётом цены.
+9. Позволить администратору менять вариант проживания с проверкой доступности и пересчётом цены.
+10. Отправлять ежедневную сводку администратору в 09:00 по Иркутску.
+11. Группировать повторяющиеся критические ошибки и отправлять сводку каждые 30 минут.
+12. Добавить модульные, интеграционные и сквозные тесты для каждого изменённого сценария.
 
-Before implementation, create a full project archive and a timestamped database backup.
+Перед началом реализации необходимо создать полный архив проекта и резервную копию базы данных с отметкой времени.
 
-## Delivery Strategy
+## Стратегия реализации
 
-Use an incremental core replacement. Existing working handlers remain available while the
-business logic they use is moved into focused services. Every changed write workflow uses
-`get_session()` and commits through a short transaction. The backward-compatible global
-`session` remains temporarily for untouched legacy paths, but no new or modified feature may
-depend on it.
+Используем постепенную замену ядра. Работающие обработчики сохраняются, а используемая ими
+бизнес-логика переносится в отдельные сервисы. Каждый изменяемый сценарий записи использует
+`get_session()` и короткую транзакцию. Глобальная `session` временно остаётся для нетронутых
+старых сценариев, но новые и изменённые функции не должны от неё зависеть.
 
-## Data Model
+## Модель данных
 
 ### Booking
 
-Add:
+Добавить поля:
 
-- `calculated_total`: current calculated booking price.
-- `payment_status`: `awaiting_payment`, `partially_paid`, `paid`, `overpaid`, or `refunded`.
-- `stay_status`: `awaiting_checkin`, `checked_in`, `checked_out`, or `completed`.
-- `stay_status_changed_at`: last automatic or manual stay-status transition.
+- `calculated_total` — текущая рассчитанная стоимость заявки.
+- `payment_status` — `awaiting_payment`, `partially_paid`, `paid`, `overpaid` или `refunded`.
+- `stay_status` — `awaiting_checkin`, `checked_in`, `checked_out` или `completed`.
+- `stay_status_changed_at` — время последнего автоматического или ручного изменения статуса проживания.
 
-Keep the existing `status` column during the transition. A compatibility mapper updates it
-where old handlers still require it, but new financial and stay logic must not derive state
-from the legacy column.
+Существующее поле `status` временно сохраняется для совместимости. Отдельный слой совместимости
+будет обновлять его там, где оно ещё требуется старым обработчикам. Новая финансовая логика и
+логика проживания не должны определять состояние заявки по старому полю.
 
 ### PaymentTransaction
 
-Immutable ledger entry:
+Неизменяемая запись платёжной операции:
 
 - `id`
 - `booking_id`
 - `amount`
-- `kind`: `payment`, `refund`, or `adjustment`
+- `kind` — `payment`, `refund` или `adjustment`
 - `payment_method`
 - `admin_id`
 - `comment`
 - `created_at`
 
-Positive payments increase the paid balance. Refunds reduce the net paid balance. Adjustments
-are explicit corrections and must include a comment.
+Оплаты увеличивают внесённую сумму. Возвраты уменьшают чистую оплаченную сумму. Корректировка
+является явным исправлением администратора и обязательно содержит комментарий.
 
 ### BookingChange
 
-Audit entry:
+Запись истории изменения заявки:
 
 - `booking_id`
 - `actor_id`
@@ -69,11 +68,12 @@ Audit entry:
 - `after_json`
 - `created_at`
 
-It records date changes, accommodation changes, recalculations, and manual stay-status changes.
+В историю записываются переносы дат, изменения проживания, перерасчёты стоимости и ручные
+изменения статуса проживания.
 
 ### ErrorEvent
 
-Persistent error aggregation:
+Запись для группировки ошибок:
 
 - `fingerprint`
 - `message`
@@ -84,195 +84,196 @@ Persistent error aggregation:
 - `reported_count`
 - `last_summary_at`
 
-The fingerprint is based on exception type, normalized message, and the top application stack
-frame.
+Отпечаток ошибки строится из типа исключения, нормализованного сообщения и первой строки стека,
+относящейся к коду проекта.
 
-## Services
+## Сервисы
 
-### Payment Service
+### Сервис платежей
 
-Responsibilities:
+Обязанности:
 
-- Append payments, refunds, and adjustments in a short transaction.
-- Calculate paid, refunded, net paid, remaining, and overpaid totals from the ledger.
-- Derive `payment_status`.
-- Prevent negative amounts and invalid refunds.
-- Warn before accepting an overpayment.
-- Verify persisted values using a fresh session before reporting success.
+- Добавлять оплаты, возвраты и корректировки в короткой транзакции.
+- Рассчитывать внесено, возвращено, чистую оплату, остаток и переплату по истории операций.
+- Определять `payment_status`.
+- Запрещать отрицательные суммы и недопустимые возвраты.
+- Предупреждать перед принятием переплаты.
+- Проверять сохранённые значения через новую сессию до отправки сообщения об успехе.
 
-Existing `paid_amount` remains as a compatibility cache and is updated from the ledger after
-each transaction.
+Существующее поле `paid_amount` временно остаётся кешем совместимости и обновляется по истории
+операций после каждой транзакции.
 
-### Booking Management Service
+### Сервис управления заявками
 
-Responsibilities:
+Обязанности:
 
-- Change dates after validating availability.
-- Change accommodation after validating availability.
-- Recalculate price using the pricing service.
-- Keep all existing payment transactions.
-- Return the new remaining balance or overpayment.
-- Write a `BookingChange` audit record.
-- Invalidate booked-date caches only after a successful commit.
+- Переносить даты после проверки доступности.
+- Менять вариант проживания после проверки доступности.
+- Пересчитывать стоимость через сервис ценообразования.
+- Сохранять всю историю платежей.
+- Возвращать новый остаток или размер переплаты.
+- Создавать запись `BookingChange`.
+- Очищать кеш занятых дат только после успешного сохранения.
 
-### Stay Service
+### Сервис проживания
 
-Uses timezone `Asia/Irkutsk`.
+Использует часовой пояс `Asia/Irkutsk`.
 
-Automatic transitions:
+Автоматические переходы:
 
-- Confirmed active booking starts as `awaiting_checkin`.
-- At 14:00 on `date_from`: `checked_in`.
-- At 12:00 on `date_to`: `checked_out`.
-- After the review request is logged: `completed`.
+- Подтверждённая активная заявка получает статус `awaiting_checkin`.
+- В 14:00 даты заезда статус меняется на `checked_in`.
+- В 12:00 даты выезда статус меняется на `checked_out`.
+- После отправки запроса отзыва статус меняется на `completed`.
 
-Admin may manually correct any stay status. Manual changes create a `BookingChange` record.
-The automatic scheduler must not immediately undo a valid manual correction unless the next
-chronological transition is due.
+Администратор может вручную исправить любой статус проживания. Ручное изменение создаёт запись
+`BookingChange`. Планировщик не должен сразу отменять корректное ручное изменение до наступления
+следующего перехода по времени.
 
-### Booking Card Service
+### Сервис карточек заявок
 
-Produces a shared structured booking view used by guest and admin formatters. It includes:
+Создаёт единое структурированное представление заявки для гостя и администратора:
 
-- Guest and accommodation details.
-- Dates and people count.
-- Current calculated total.
-- Paid, refunded, remaining, and overpaid amounts.
-- Payment status with emoji.
-- Stay status with emoji.
-- Admin-only notes and actions where applicable.
+- Данные гостя и вариант проживания.
+- Даты и количество гостей.
+- Текущая рассчитанная стоимость.
+- Внесено, возвращено, остаток и переплата.
+- Статус оплаты с эмодзи.
+- Статус проживания с эмодзи.
+- Административные заметки и действия только в админской карточке.
 
-No router calculates financial totals or status labels independently.
+Роутеры не должны самостоятельно рассчитывать финансовые итоги или подписи статусов.
 
-### Notification Service
+### Сервис уведомлений
 
-Idempotent notifications are logged in `NotificationLog`.
+Все отправленные уведомления фиксируются в `NotificationLog`, чтобы исключить дублирование.
 
-- Reminders at 7, 3, and 1 day before arrival to guest and admin.
-- Arrival-day summary at 09:00.
-- Departure-day reminder at 09:00.
-- Every message includes the remaining balance when greater than zero.
-- Review request after departure and stay completion.
-- Restarting the bot must not duplicate already-sent notifications.
+- Напоминания за 7, 3 и 1 день до заезда гостю и администратору.
+- Уведомление в день заезда в 09:00.
+- Уведомление в день выезда в 09:00.
+- Если остаток больше нуля, он указывается в каждом сообщении.
+- После выезда отправляется просьба оставить отзыв, затем проживание завершается.
+- Перезапуск бота не должен повторно отправлять уже отправленные уведомления.
 
-### Daily Summary Service
+### Сервис ежедневной сводки
 
-At 09:00 Asia/Irkutsk, send the administrator:
+Каждый день в 09:00 по Иркутску администратор получает:
 
-- Today's arrivals and departures.
-- Bookings with remaining balances.
-- Payment-deadline problems.
-- Current checked-in guests.
-- New and repeated critical error counts from the previous day.
+- Заезды и выезды на сегодня.
+- Заявки с остатком оплаты.
+- Проблемы со сроками оплаты.
+- Текущих заселённых гостей.
+- Количество новых и повторных критических ошибок за прошедшие сутки.
 
-### Error Monitor Service
+### Сервис мониторинга ошибок
 
-- Send the first occurrence of a critical error immediately.
-- Store and count matching repetitions.
-- Send a grouped repeat summary every 30 minutes.
-- Avoid sending identical tracebacks repeatedly.
+- Первая критическая ошибка отправляется сразу.
+- Одинаковые повторения сохраняются и подсчитываются.
+- Каждые 30 минут отправляется сгруппированная сводка повторов.
+- Одинаковые трассировки не отправляются администратору многократно.
 
-## Admin Workflows
+## Административные сценарии
 
-### Add Payment
+### Добавить оплату
 
-Admin opens a booking card and selects `➕ Добавить оплату`.
+Администратор открывает карточку заявки и выбирает `➕ Добавить оплату`.
 
-1. Bot asks for amount.
-2. Bot asks for payment method or offers common method buttons.
-3. Service previews new paid, remaining, or overpaid totals.
-4. If overpaid, admin must explicitly confirm.
-5. Payment transaction is committed and verified.
-6. Guest is notified when linked to Telegram.
+1. Бот запрашивает сумму.
+2. Бот запрашивает способ оплаты или предлагает кнопки популярных способов.
+3. Сервис показывает новые значения: внесено, остаток или переплата.
+4. При переплате требуется явное подтверждение администратора.
+5. Платёж сохраняется и проверяется через новую сессию.
+6. Связанный с Telegram гость получает уведомление.
 
-The existing `Изменить предоплату` becomes an explicit correction action, not the normal payment
-workflow.
+Существующее действие `Изменить предоплату` становится явной корректировкой, а не обычным
+способом добавления оплаты.
 
-### Change Dates
+### Перенести даты
 
-1. Admin selects a booking.
-2. Calendar shows available and unavailable dates for the current accommodation.
-3. Admin selects start and end dates.
-4. Bot previews availability, new total, remaining balance, or overpayment.
-5. Admin confirms.
-6. Change commits atomically and notifications are sent.
+1. Администратор выбирает заявку.
+2. Календарь показывает свободные и занятые даты для текущего варианта проживания.
+3. Администратор выбирает даты заезда и выезда.
+4. Бот показывает доступность, новую стоимость, остаток или переплату.
+5. Администратор подтверждает изменение.
+6. Изменение сохраняется одной транзакцией, затем отправляются уведомления.
 
-### Change Accommodation
+### Изменить вариант проживания
 
-1. Admin selects a booking.
-2. Bot offers valid accommodation combinations for the guest count and duration.
-3. Unavailable options are disabled or clearly marked.
-4. Bot previews new total and balance.
-5. Admin confirms.
-6. Change commits atomically and notifications are sent.
+1. Администратор выбирает заявку.
+2. Бот предлагает допустимые комбинации для количества гостей и длительности.
+3. Недоступные варианты отключены или явно отмечены.
+4. Бот показывает новую стоимость и баланс.
+5. Администратор подтверждает изменение.
+6. Изменение сохраняется одной транзакцией, затем отправляются уведомления.
 
-## Error Handling
+## Обработка ошибок
 
-- A user-facing success message is sent only after a fresh-session persistence check.
-- Database exceptions roll back the short transaction and leave the booking unchanged.
-- Telegram notification failures do not roll back already committed business data; they are
-  logged and retried where appropriate.
-- Invalid date or accommodation changes show a clear reason and preserve the current booking.
+- Сообщение об успешном действии отправляется только после проверки сохранения через новую сессию.
+- Ошибки базы данных откатывают короткую транзакцию и не изменяют заявку.
+- Ошибка Telegram при отправке уведомления не откатывает уже сохранённые бизнес-данные; она
+  записывается в журнал и при необходимости повторяется.
+- При недопустимом переносе дат или смене проживания бот показывает понятную причину и сохраняет
+  текущую заявку без изменений.
 
-## Testing
+## Тестирование
 
-Use a temporary SQLite database and a fake Telegram transport.
+Используется временная SQLite-база и поддельный Telegram-транспорт без отправки реальных сообщений.
 
-### Unit Tests
+### Модульные тесты
 
-- Payment ledger totals, partial payment, full payment, refund, correction, and overpayment.
-- Payment and stay status derivation.
-- Price recalculation after date and accommodation changes.
-- Stay transition times in Asia/Irkutsk.
-- Error fingerprinting and grouping.
-- Daily summary composition.
-- Unified card formatting.
+- Расчёты истории платежей: частичная и полная оплата, возврат, корректировка и переплата.
+- Определение статусов оплаты и проживания.
+- Перерасчёт цены после переноса дат и изменения проживания.
+- Переходы статусов проживания по времени Иркутска.
+- Создание отпечатков ошибок и группировка повторов.
+- Формирование ежедневной сводки.
+- Форматирование единых карточек заявки.
 
-### Integration Tests
+### Интеграционные тесты
 
-- Migrations create new tables and preserve existing bookings.
-- Short transactions persist across fresh sessions.
-- Add-payment workflow updates ledger, compatibility fields, card, and guest notification.
-- Date change validates availability and keeps payment history.
-- Accommodation change validates availability and keeps payment history.
-- Reminder and review tasks remain idempotent after restart.
-- Manual stay-status correction is audited.
+- Миграции создают новые таблицы и сохраняют существующие заявки.
+- Короткие транзакции сохраняются и видны через новую сессию.
+- Добавление оплаты обновляет историю, совместимые поля, карточку и уведомление гостю.
+- Перенос дат проверяет доступность и сохраняет историю платежей.
+- Изменение проживания проверяет доступность и сохраняет историю платежей.
+- Напоминания и запросы отзывов не дублируются после перезапуска.
+- Ручное изменение статуса проживания записывается в историю.
 
-### End-to-End Bot Tests
+### Сквозные тесты бота
 
-Test every button and FSM path affected by the project:
+Проверяются все кнопки и FSM-сценарии, затронутые проектом:
 
-1. Guest booking creation.
-2. Admin confirmation.
-3. Screenshot payment confirmation.
-4. Partial payment display.
-5. Admin-added second payment.
-6. Overpayment confirmation.
-7. Date change.
-8. Accommodation change.
-9. Reminder with remaining balance.
-10. Automatic check-in.
-11. Automatic checkout.
-12. Review request and completion.
-13. Daily summary.
-14. First critical error and grouped repeats.
-15. Bot restart without duplicate notifications.
+1. Создание заявки гостем.
+2. Подтверждение заявки администратором.
+3. Подтверждение оплаты после скриншота.
+4. Отображение частичной оплаты.
+5. Добавление второй оплаты администратором.
+6. Подтверждение переплаты.
+7. Перенос дат.
+8. Изменение варианта проживания.
+9. Напоминание с остатком оплаты.
+10. Автоматическое заселение.
+11. Автоматическое выселение.
+12. Запрос отзыва и завершение проживания.
+13. Ежедневная сводка.
+14. Первая критическая ошибка и сводка повторов.
+15. Перезапуск бота без повторных уведомлений.
 
-The final verification also runs compilation for every Python file, all existing tests, all new
-tests, import checks, and a deployment smoke test on Bothost.
+Финальная проверка также запускает компиляцию всех Python-файлов, существующие и новые тесты,
+проверку импортов и проверку запуска после публикации на Bothost.
 
-## Backup And Deployment
+## Резервная копия и публикация
 
-Before implementation:
+Перед реализацией:
 
-- Create a timestamped full-project ZIP excluding generated caches and prior deployment archives.
-- Create a timestamped database backup.
-- Verify both artifacts can be opened.
+- Создать полный ZIP-архив проекта с отметкой времени без кешей и старых архивов публикации.
+- Создать резервную копию базы данных с отметкой времени.
+- Проверить, что оба файла открываются.
 
-Deployment is incremental. After each migration or workflow group:
+Публикация выполняется поэтапно. После каждой группы миграций или сценариев:
 
-- Run the relevant tests.
-- Push to GitHub.
-- Update Bothost.
-- Confirm the bot reaches `Работает`.
-- Inspect logs and perform the matching Telegram smoke test.
+- Запускаются относящиеся к этапу тесты.
+- Изменения отправляются в GitHub.
+- Bothost обновляется.
+- Проверяется статус `Работает`.
+- Проверяются логи и соответствующий сценарий в Telegram.
