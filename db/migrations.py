@@ -50,15 +50,3 @@ def run_migrations():
                     )
                 )
                 logging.info("Migration added column %s.%s", table_name, column_name)
-
-        if "bookings" in existing_tables:
-            restored = connection.execute(
-                text(
-                    "UPDATE bookings "
-                    "SET paid_amount = 6000, status = 'paid', payment_deadline = NULL "
-                    "WHERE id = 17 AND COALESCE(paid_amount, 0) = 0 "
-                    "AND status = 'awaiting_payment_confirmation'"
-                )
-            )
-            if restored.rowcount:
-                logging.info("Restored confirmed partial payment for booking #17")
