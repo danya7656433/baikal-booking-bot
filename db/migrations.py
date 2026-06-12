@@ -50,14 +50,3 @@ def run_migrations():
                     )
                 )
                 logging.info("Migration added column %s.%s", table_name, column_name)
-
-        if "bookings" in existing_tables:
-            repaired = connection.execute(
-                text(
-                    "UPDATE bookings SET user_id = NULL, status = 'paid' "
-                    "WHERE id = 19 AND username = 'admin_manual' "
-                    "AND user_id IS NOT NULL AND COALESCE(paid_amount, 0) > 0"
-                )
-            )
-            if repaired.rowcount:
-                logging.info("Repaired admin-created booking #19 ownership and payment status")
