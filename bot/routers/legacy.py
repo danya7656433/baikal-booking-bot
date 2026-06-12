@@ -116,6 +116,7 @@ from bot.states import BookingStates
 from services.availability_service import get_available_room_options, is_available_for_duration
 from services.booking_service import get_children_beds, get_duration_text
 from services.booking_card_service import build_booking_card_data, format_admin_booking_card
+from services.booking_management_service import update_booking_accommodation
 from services.financial_service import apply_confirmed_payment, calculate_booking_balance, payment_status_label
 from services.payment_service import add_adjustment, add_payment, get_payment_balance
 from services.paths import BACKUP_DIR, DATABASE_PATH, LOG_PATH
@@ -8432,6 +8433,7 @@ async def send_admin_booking_cards(target_message, bookings, empty_text: str):
                 inline_keyboard=[
                     [InlineKeyboardButton(text="Изменить статус", callback_data=f"admin_change_status_{booking.id}")],
                     [InlineKeyboardButton(text="Редактировать", callback_data=f"admin_edit_booking_{booking.id}")],
+                    [InlineKeyboardButton(text="🏡 Статус проживания", callback_data=f"admin_stay_status_{booking.id}")],
                     [InlineKeyboardButton(text="➕ Добавить оплату", callback_data=f"admin_add_payment_{booking.id}")],
                     [InlineKeyboardButton(text="✏️ Исправить внесённую сумму", callback_data=f"admin_update_payment_{booking.id}")],
                 ]
@@ -8576,14 +8578,34 @@ async def process_admin_booking_edit(message: Message, state: FSMContext):
         if end_date <= start_date:
             await message.answer("Дата выезда должна быть позже даты заезда.")
             return
-        booking.date_from = start_date
-        booking.date_to = end_date
-        booking.room_type = room_type
+        booking_user_id = booking.user_id
+        result = await update_booking_accommodation(
+            booking.id,
+            message.from_user.id,
+            date_from=start_date,
+            date_to=end_date,
+            room_type=room_type,
+        )
         session.add(AdminLog(admin_id=message.from_user.id, booking_id=booking.id, action=f"Изменил даты/номер заявки #{booking.id}"))
         session.commit()
         clear_booked_dates_cache()
         await state.clear()
-        await message.answer(f"Заявка #{booking.id} обновлена.")
+        await message.answer(
+            f"Заявка #{booking.id} обновлена.\n"
+            f"Новая сумма: {result['total']}₽\n"
+            f"Внесено сохранено: {result['paid']}₽\n"
+            f"Осталось: {result['remaining']}₽"
+        )
+        if booking_user_id:
+            await message.bot.send_message(
+                booking_user_id,
+                f"📅 Заявка #{booking.id} изменена администратором.\n"
+                f"Новые даты: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n"
+                f"Номер: {room_type_names.get(room_type, room_type)}\n"
+                f"Новая сумма: {result['total']}₽\n"
+                f"Внесено: {result['paid']}₽\n"
+                f"Осталось: {result['remaining']}₽",
+            )
     except Exception as error:
         await message.answer(f"Не удалось обновить заявку: {error}")
 

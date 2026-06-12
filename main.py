@@ -96,11 +96,13 @@ async def main():
 
     try:
         from utils import check_support_timeouts, schedule_reminders, schedule_reviews
+        from services.stay_service import schedule_stay_transitions
 
         asyncio.create_task(schedule_reminders(bot))
         asyncio.create_task(schedule_backups())
         asyncio.create_task(schedule_reviews(bot))
         asyncio.create_task(check_support_timeouts(bot))
+        asyncio.create_task(schedule_stay_transitions())
         logging.info("Background tasks registered")
     except ImportError:
         logging.exception("Failed to register background tasks")
