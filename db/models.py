@@ -70,6 +70,9 @@ class Booking(Base):
     payment_status = Column(String, nullable=True)
     stay_status = Column(String, default="awaiting_checkin")
     stay_status_changed_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, nullable=True)
+    deletion_reason = Column(String, nullable=True)
 
 
 class PaymentTransaction(Base):

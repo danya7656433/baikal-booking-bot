@@ -170,6 +170,7 @@ async def get_booked_dates(
             db_session.query(Booking)
             .filter(
                 Booking.status.in_(["new", "pending", "awaiting_payment", "paid"]),
+                Booking.deleted_at.is_(None),
                 Booking.date_from >= datetime(current_year, 1, 1),
                 Booking.date_from < datetime(current_year + 1, 1, 1),
             )
@@ -312,6 +313,7 @@ async def is_room_available(
                         .filter(
                             Booking.date_from == current_date,
                             Booking.status.in_(["pending", "paid"]),
+                            Booking.deleted_at.is_(None),
                         )
                         .all()
                     )

@@ -27,6 +27,7 @@ async def my_bookings(callback: CallbackQuery, state: FSMContext):
             .filter(
                 Booking.user_id == user_id,
                 Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+                Booking.deleted_at.is_(None),
             )
             .order_by(Booking.created_at.asc())
             .all()
@@ -138,6 +139,7 @@ def _room_conflicts(db_session, booking, start_date, end_date) -> bool:
         .filter(
             Booking.id != booking.id,
             Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+            Booking.deleted_at.is_(None),
             Booking.date_from < end_date,
             Booking.date_to > start_date,
         )

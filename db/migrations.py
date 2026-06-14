@@ -22,6 +22,9 @@ MISSING_COLUMNS = {
         "payment_status": "VARCHAR",
         "stay_status": "VARCHAR DEFAULT 'awaiting_checkin'",
         "stay_status_changed_at": "DATETIME",
+        "deleted_at": "DATETIME",
+        "deleted_by": "INTEGER",
+        "deletion_reason": "VARCHAR",
     },
     "news": {
         "video_id": "VARCHAR",

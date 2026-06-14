@@ -52,7 +52,7 @@ async def _send_once(bot, chat_id: int, text: str, *, key: str, booking_id: int,
 async def process_booking_notifications(bot, today=None) -> int:
     today = today or datetime.now(IRKUTSK).date()
     with get_session() as db_session:
-        bookings = db_session.query(Booking).filter(Booking.status == "paid").all()
+        bookings = db_session.query(Booking).filter(Booking.status == "paid", Booking.deleted_at.is_(None)).all()
         for booking in bookings:
             if booking.calculated_total is None:
                 booking.calculated_total = await calculate_revenue(
@@ -66,14 +66,24 @@ async def process_booking_notifications(bot, today=None) -> int:
     for booking_id, user_id, full_name, date_from, date_to, balance_text in snapshots:
         days = (date_from - today).days
         if days in {7, 3, 1, 0}:
-            for recipient, chat_id in (("guest", user_id), ("admin", ADMIN_CHAT_ID)):
+            recipients = {}
+            if user_id:
+                recipients[user_id] = "guest"
+            if ADMIN_CHAT_ID:
+                recipients[ADMIN_CHAT_ID] = "admin"
+            for chat_id, recipient in recipients.items():
                 if not chat_id:
                     continue
                 key = f"checkin:{booking_id}:{days}:{recipient}"
                 if await _send_once(bot, chat_id, f"📅 Заезд по заявке #{booking_id}: {date_from.strftime('%d.%m.%Y')} после 14:00.\n{balance_text}", key=key, booking_id=booking_id, kind="checkin_reminder", recipient=recipient, days_before=days):
                     sent += 1
         if date_to == today:
-            for recipient, chat_id in (("guest", user_id), ("admin", ADMIN_CHAT_ID)):
+            recipients = {}
+            if user_id:
+                recipients[user_id] = "guest"
+            if ADMIN_CHAT_ID:
+                recipients[ADMIN_CHAT_ID] = "admin"
+            for chat_id, recipient in recipients.items():
                 key = f"checkout:{booking_id}:{recipient}"
                 if chat_id and await _send_once(bot, chat_id, f"📤 Сегодня выезд по заявке #{booking_id} до 12:00.\n{balance_text}", key=key, booking_id=booking_id, kind="checkout", recipient=recipient, days_before=0):
                     sent += 1

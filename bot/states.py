@@ -44,6 +44,7 @@ class BookingStates(StatesGroup):
     viewing_admin_calendar = State()
     waiting_for_admin_booking_search = State()
     waiting_for_admin_booking_edit = State()
+    waiting_for_admin_booking_field_value = State()
     waiting_for_blocked_dates_start = State()
     waiting_for_blocked_dates_end = State()
     waiting_for_guest_note = State()

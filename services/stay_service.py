@@ -49,7 +49,10 @@ def apply_due_stay_transitions(now: datetime | None = None) -> list[int]:
     now = now or datetime.now(IRKUTSK)
     changed = []
     with get_session() as db_session:
-        bookings = db_session.query(Booking).filter(Booking.status.in_(("paid", "completed"))).all()
+        bookings = db_session.query(Booking).filter(
+            Booking.status.in_(("paid", "completed")),
+            Booking.deleted_at.is_(None),
+        ).all()
         for booking in bookings:
             due = calculate_due_stay_status(booking, now)
             current = booking.stay_status or "awaiting_checkin"

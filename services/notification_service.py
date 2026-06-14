@@ -7,7 +7,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
 from config import ADMIN_CHAT_ID
-from services.error_monitor_service import record_error
+from services.error_monitor_service import classify_error, record_error
 
 
 class TelegramHandler(logging.Handler):
@@ -23,6 +23,8 @@ class TelegramHandler(logging.Handler):
         try:
             log_message = self.format(record)
             exc = record.exc_info[1] if record.exc_info else RuntimeError(record.getMessage())
+            if classify_error(exc) == "transient_telegram":
+                return
             result = record_error(exc, log_message)
             if not result["first"] or self._sending:
                 return

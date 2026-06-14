@@ -8419,6 +8419,8 @@ async def process_admin_bookings_menu(message: Message, state: FSMContext):
 
 
 async def send_admin_booking_cards(target_message, bookings, empty_text: str):
+    from bot.routers.admin_booking_edit import admin_booking_control_keyboard
+    bookings = [booking for booking in bookings if getattr(booking, "deleted_at", None) is None]
     if not bookings:
         await target_message.answer(
             empty_text,
@@ -8429,15 +8431,7 @@ async def send_admin_booking_cards(target_message, bookings, empty_text: str):
         text = format_admin_booking_card(await build_booking_card_data(booking.id))
         await target_message.answer(
             text,
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Изменить статус", callback_data=f"admin_change_status_{booking.id}")],
-                    [InlineKeyboardButton(text="Редактировать", callback_data=f"admin_edit_booking_{booking.id}")],
-                    [InlineKeyboardButton(text="🏡 Статус проживания", callback_data=f"admin_stay_status_{booking.id}")],
-                    [InlineKeyboardButton(text="➕ Добавить оплату", callback_data=f"admin_add_payment_{booking.id}")],
-                    [InlineKeyboardButton(text="✏️ Исправить внесённую сумму", callback_data=f"admin_update_payment_{booking.id}")],
-                ]
-            ),
+            reply_markup=admin_booking_control_keyboard(booking.id),
         )
 
 

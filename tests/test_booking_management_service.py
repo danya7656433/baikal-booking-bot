@@ -12,7 +12,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Base, Booking, BookingChange
-from services.booking_management_service import update_booking_accommodation
+from services.booking_management_service import (
+    change_booking_stage,
+    restore_booking,
+    soft_delete_booking,
+    update_booking_accommodation,
+    update_booking_fields,
+)
 
 
 class BookingManagementServiceTest(unittest.IsolatedAsyncioTestCase):
@@ -77,6 +83,34 @@ class BookingManagementServiceTest(unittest.IsolatedAsyncioTestCase):
                 self.booking_id, 99,
                 date_from=date(2026, 7, 4), date_to=date(2026, 7, 4),
             )
+
+    async def test_soft_delete_and_restore_booking(self):
+        soft_delete_booking(self.booking_id, 99, "дубль")
+        with self.Session() as db_session:
+            booking = db_session.get(Booking, self.booking_id)
+            self.assertIsNotNone(booking.deleted_at)
+            self.assertEqual(booking.deleted_by, 99)
+            self.assertEqual(booking.deletion_reason, "дубль")
+        restore_booking(self.booking_id, 99)
+        with self.Session() as db_session:
+            booking = db_session.get(Booking, self.booking_id)
+            self.assertIsNone(booking.deleted_at)
+            self.assertIsNone(booking.deleted_by)
+
+    async def test_update_fields_and_stage_write_history(self):
+        update_booking_fields(self.booking_id, 99, full_name="Новое имя", phone="+79000000000")
+        change_booking_stage(self.booking_id, 99, "pending")
+        with self.Session() as db_session:
+            booking = db_session.get(Booking, self.booking_id)
+            changes = list(db_session.scalars(select(BookingChange)))
+        self.assertEqual(booking.full_name, "Новое имя")
+        self.assertEqual(booking.phone, "+79000000000")
+        self.assertEqual(booking.status, "pending")
+        self.assertEqual(len(changes), 2)
+
+    async def test_invalid_stage_transition_is_rejected(self):
+        with self.assertRaises(ValueError):
+            change_booking_stage(self.booking_id, 99, "not-a-stage")
 
 
 if __name__ == "__main__":

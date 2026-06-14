@@ -1,14 +1,47 @@
 import asyncio
 import hashlib
+import re
 from datetime import datetime, timedelta
 
 from config import ADMIN_CHAT_ID
 from db import ErrorEvent, get_session
 
 
+def classify_error(exc: BaseException) -> str:
+    message = str(exc).lower()
+    if "terminated by other getupdates request" in message or "telegramconflicterror" in message:
+        return "instance_conflict"
+    transient_markers = (
+        "failed to fetch updates",
+        "telegramretryafter",
+        "flood control",
+        "bad gateway",
+        "connection reset",
+        "telegramnetworkerror",
+        "clientconnectorerror",
+        "clientoserror",
+        "timed out",
+        "timeout",
+    )
+    if any(marker in message for marker in transient_markers):
+        return "transient_telegram"
+    return "critical"
+
+
+def _normalize_error_text(text: str) -> str:
+    normalized = (text or "").lower()
+    normalized = re.sub(r"retry (?:in|after) \d+(?:\.\d+)? seconds?", "retry after <n> seconds", normalized)
+    normalized = re.sub(r"\b\d+(?:\.\d+)?\b", "<n>", normalized)
+    return normalized
+
+
 def make_error_fingerprint(exc: BaseException, traceback_text: str) -> str:
-    tail = "\n".join((traceback_text or "").splitlines()[-4:])
-    raw = f"{type(exc).__name__}:{exc}:{tail}"
+    category = classify_error(exc)
+    if category == "transient_telegram":
+        raw = f"{category}:{_normalize_error_text(str(exc))}"
+    else:
+        tail = "\n".join((traceback_text or "").splitlines()[-4:])
+        raw = f"{category}:{type(exc).__name__}:{_normalize_error_text(str(exc))}:{_normalize_error_text(tail)}"
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 

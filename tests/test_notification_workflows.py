@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Base, Booking, NotificationLog
+from config import ADMIN_CHAT_ID
 from services.booking_notification_service import process_booking_notifications
 
 
@@ -64,6 +65,15 @@ class NotificationWorkflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("Осталось оплатить: 6000₽" in text for _, text, _ in bot.messages))
         with self.Session() as db_session:
             self.assertEqual(db_session.query(NotificationLog).count(), 2)
+
+    async def test_admin_guest_same_chat_receives_one_admin_message(self):
+        with self.Session.begin() as db_session:
+            booking = db_session.query(Booking).first()
+            booking.user_id = ADMIN_CHAT_ID
+        bot = FakeBot()
+        self.assertEqual(await process_booking_notifications(bot, date(2026, 6, 12)), 1)
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(bot.messages[0][0], ADMIN_CHAT_ID)
 
 
 if __name__ == "__main__":
