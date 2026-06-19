@@ -116,7 +116,7 @@ from bot.states import BookingStates
 from services.availability_service import get_available_room_options, is_available_for_duration
 from services.booking_service import get_children_beds, get_duration_text
 from services.booking_card_service import build_booking_card_data, format_admin_booking_card
-from services.booking_management_service import update_booking_accommodation
+from services.booking_management_service import get_admin_booking_counts, update_booking_accommodation
 from services.financial_service import apply_confirmed_payment, calculate_booking_balance, payment_status_label
 from services.payment_service import add_adjustment, add_payment, get_payment_balance
 from services.paths import BACKUP_DIR, DATABASE_PATH, LOG_PATH
@@ -8290,26 +8290,9 @@ async def list_bookings(callback: CallbackQuery, state: FSMContext):
     # Сохраняем предыдущее состояние для кнопки "Назад"
     await state.update_data(previous_menu="admin")
 
-    # Синхронизированный словарь типов номеров
-    room_counts = {room_type: 0 for room_type in room_type_names}
-    # Считаем количество заявок в ожидании оплаты
-    awaiting_payment_count = (
-        session.query(Booking).filter(Booking.status == BookingStatus.AWAITING_PAYMENT.value).count()
-    )
-
-    for booking in (
-        session.query(Booking)
-        .filter(
-            Booking.status.in_(ACTIVE_BOOKING_STATUSES)
-        )
-        .all()
-    ):
-        if booking.room_type in room_counts:
-            room_counts[booking.room_type] += 1
-        else:
-            logging.warning(
-                f"Неизвестный тип номера в базе: {booking.room_type}, заявка #{booking.id}"
-            )
+    counts = get_admin_booking_counts()
+    room_counts = counts["room_counts"]
+    awaiting_payment_count = counts["awaiting_payment_count"]
 
     keyboard_rows = [
         [KeyboardButton(text=f"{room_type_names[room]} ({count})")]
@@ -8372,6 +8355,7 @@ async def process_admin_bookings_menu(message: Message, state: FSMContext):
         bookings = (
             session.query(Booking)
             .filter(Booking.status == status)
+            .filter(Booking.deleted_at.is_(None))
             .order_by(Booking.date_from.asc())
             .all()
         )
@@ -8386,6 +8370,7 @@ async def process_admin_bookings_menu(message: Message, state: FSMContext):
         bookings = (
             session.query(Booking)
             .filter(Booking.status == BookingStatus.AWAITING_PAYMENT.value)
+            .filter(Booking.deleted_at.is_(None))
             .order_by(Booking.date_from.asc())
             .all()
         )
@@ -8404,6 +8389,7 @@ async def process_admin_bookings_menu(message: Message, state: FSMContext):
             .filter(
                 Booking.room_type == room_type,
                 Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+                Booking.deleted_at.is_(None),
             )
             .order_by(Booking.date_from.asc())
             .all()
@@ -8441,7 +8427,12 @@ async def admin_filter_status(callback: CallbackQuery, state: FSMContext):
         await callback.answer("У вас нет прав", show_alert=True)
         return
     status = callback.data.replace("admin_filter_status_", "", 1)
-    bookings = session.query(Booking).filter(Booking.status == status).order_by(Booking.date_from.asc()).all()
+    bookings = (
+        session.query(Booking)
+        .filter(Booking.status == status, Booking.deleted_at.is_(None))
+        .order_by(Booking.date_from.asc())
+        .all()
+    )
     await callback.message.delete()
     await send_admin_booking_cards(callback.message, bookings, f"Заявок со статусом {BOOKING_STATUS_LABELS.get(status, status)} нет.")
     await callback.answer()

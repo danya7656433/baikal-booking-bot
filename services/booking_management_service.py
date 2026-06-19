@@ -1,7 +1,7 @@
 import json
 from datetime import date, datetime
 
-from config import room_type_names
+from config import ACTIVE_BOOKING_STATUSES, BookingStatus, room_type_names
 from db import Booking, BookingChange, get_session
 from services.booking_service import get_booking_people_count
 from services.payment_service import get_payment_balance
@@ -14,6 +14,37 @@ BOOKING_STAGES = {
 EDITABLE_FIELDS = {
     "full_name", "phone", "adults", "children", "comment", "admin_comment", "manual_total",
 }
+
+
+def get_admin_booking_counts() -> dict[str, dict[str, int] | int]:
+    room_counts = {room_type: 0 for room_type in room_type_names}
+    with get_session() as db_session:
+        room_types = [
+            row[0]
+            for row in (
+                db_session.query(Booking.room_type)
+                .filter(
+                    Booking.status.in_(ACTIVE_BOOKING_STATUSES),
+                    Booking.deleted_at.is_(None),
+                )
+                .all()
+            )
+        ]
+        awaiting_payment_count = (
+            db_session.query(Booking)
+            .filter(
+                Booking.status == BookingStatus.AWAITING_PAYMENT.value,
+                Booking.deleted_at.is_(None),
+            )
+            .count()
+        )
+    for room_type in room_types:
+        if room_type in room_counts:
+            room_counts[room_type] += 1
+    return {
+        "room_counts": room_counts,
+        "awaiting_payment_count": awaiting_payment_count,
+    }
 
 
 def update_booking_fields(booking_id: int, actor_id: int, **changes) -> None:
