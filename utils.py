@@ -21,6 +21,7 @@ from database import (
     BlockedDate,
 )
 from config import (
+    ACTIVE_BOOKING_STATUSES,
     room_type_names,
     PRICE_PER_ADULT,
     ALL_ROOMS_PRICE,
@@ -48,7 +49,7 @@ except ImportError:
 # Глобальный кэш для занятых дат
 booked_dates_cache = TTLCache(maxsize=100, ttl=3600) if TTLCache else {}
 
-ROOM_DEPENDENCIES = {
+_LEGACY_ROOM_DEPENDENCIES = {
     "2": ["2", "2+5", "2+4", "2+6", "2+5+4", "2+5+6", "2+4+6", "all"],
     "5": ["5", "2+5", "5+4", "5+6", "2+5+4", "2+5+6", "5+4+6", "all"],
     "4": ["4", "2+4", "5+4", "4+6", "2+5+4", "2+4+6", "5+4+6", "all"],
@@ -131,6 +132,14 @@ def get_children_beds(booking: Booking) -> list:
     return children_beds
 
 
+from services.inventory_service import rooms_overlap
+
+ROOM_DEPENDENCIES = {
+    room: [other for other in room_type_names if rooms_overlap(room, other)]
+    for room in room_type_names
+}
+
+
 async def get_booked_dates(
     room_type: str,
 ) -> Tuple[List[datetime.date], List[datetime.date]]:
@@ -169,7 +178,7 @@ async def get_booked_dates(
         bookings = (
             db_session.query(Booking)
             .filter(
-                Booking.status.in_(["new", "pending", "awaiting_payment", "paid"]),
+                Booking.status.in_(ACTIVE_BOOKING_STATUSES),
                 Booking.deleted_at.is_(None),
                 Booking.date_from >= datetime(current_year, 1, 1),
                 Booking.date_from < datetime(current_year + 1, 1, 1),

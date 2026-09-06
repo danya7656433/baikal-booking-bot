@@ -11,24 +11,25 @@ async def calculate_revenue(
     date_from: date,
     date_to: date,
 ) -> int:
+    with get_session() as db_session:
+        return calculate_revenue_in_session(db_session, room_type, total_people, date_from, date_to)
+
+
+def calculate_revenue_in_session(db_session, room_type, total_people, date_from, date_to) -> int:
     total = 0
     current_date = date_from
-
-    with get_session() as db_session:
-        while current_date < date_to:
-            price_override = (
-                db_session.query(RoomPriceOverride).filter_by(date=current_date).first()
-            )
-            price_per_person = (
-                price_override.price if price_override else PRICE_PER_ADULT
-            )
-
-            if room_type == "all" and 8 <= total_people <= 10:
-                total += ALL_ROOMS_PRICE
-            else:
-                total += total_people * price_per_person
-
-            current_date += timedelta(days=1)
+    overrides = {
+        item.date: item.price for item in db_session.query(RoomPriceOverride).filter(
+            RoomPriceOverride.date >= date_from, RoomPriceOverride.date < date_to,
+        ).order_by(RoomPriceOverride.id)
+    }
+    while current_date < date_to:
+        price_per_person = overrides.get(current_date, PRICE_PER_ADULT)
+        if room_type == "all" and 8 <= total_people <= 10:
+            total += ALL_ROOMS_PRICE
+        else:
+            total += total_people * price_per_person
+        current_date += timedelta(days=1)
 
     logging.info(
         "Calculated revenue: room=%s people=%s period=%s..%s total=%s",

@@ -4,6 +4,8 @@ from sqlalchemy import inspect, text
 
 from .models import Base
 from .session import engine
+from .inventory_guards import install_inventory_guards
+from webapp import models as web_models
 
 MISSING_COLUMNS = {
     "bookings": {
@@ -63,6 +65,9 @@ def run_migrations():
                 logging.info("Migration added column %s.%s", table_name, column_name)
 
         if "bookings" in existing_tables:
+            inventory_columns = {column["name"] for column in inspect(connection).get_columns("bookings")}
+            if {"room_type", "date_from", "date_to", "status", "deleted_at"} <= inventory_columns:
+                install_inventory_guards(connection)
             connection.execute(
                 text(
                     "UPDATE bookings SET calculated_total = manual_total "

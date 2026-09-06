@@ -20,7 +20,12 @@ def create_database_backup(
     else:
         destination = os.path.join(destination_dir, "backup.db")
 
-    source_connection = sqlite3.connect(source)
+    source_path = Path(source).resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(source_path)
+    if source_path == Path(destination).resolve():
+        raise ValueError("Source and backup destination must differ")
+    source_connection = sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True)
     try:
         destination_connection = sqlite3.connect(destination)
         try:
@@ -33,7 +38,7 @@ def create_database_backup(
 
 
 async def backup_database() -> str:
-    return create_database_backup()
+    return create_database_backup(timestamped=True)
 
 
 def list_database_backups(destination_dir: str | None = None) -> list[Path]:

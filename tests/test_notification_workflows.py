@@ -12,8 +12,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Base, Booking, NotificationLog
-from config import ADMIN_CHAT_ID
 from services.booking_notification_service import process_booking_notifications
+
+ADMIN_CHAT_ID = 1
 
 
 class FakeBot:
@@ -26,6 +27,9 @@ class FakeBot:
 
 class NotificationWorkflowTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        admin_patch = patch("services.booking_notification_service.ADMIN_CHAT_ID", ADMIN_CHAT_ID)
+        admin_patch.start()
+        self.addCleanup(admin_patch.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.engine = create_engine(f"sqlite:///{(Path(self.temp_dir.name) / 'notifications.db').as_posix()}")
         Base.metadata.create_all(self.engine)

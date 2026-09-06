@@ -9,3 +9,11 @@ data/
 backups/
 reports/
 temp_updates/
+.pytest_cache/
+.demo/
+frontend/node_modules/
+frontend/dist/
+test-results/
+*.db
+*.db-shm
+*.db-wal

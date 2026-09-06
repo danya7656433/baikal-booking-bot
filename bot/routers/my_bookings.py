@@ -13,6 +13,7 @@ from database import Booking, BookingHistory, get_session
 from services.booking_service import get_children_beds
 from services.booking_card_service import build_booking_card_data, format_guest_booking_card
 from services.financial_service import calculate_booking_balance, payment_status_label
+from services.inventory_service import is_available
 from utils import ROOM_DEPENDENCIES, calculate_revenue, clear_booked_dates_cache, get_optimal_room_combinations
 
 router = Router()
@@ -133,22 +134,7 @@ async def guest_edit_booking_start(callback: CallbackQuery, state: FSMContext):
 
 
 def _room_conflicts(db_session, booking, start_date, end_date) -> bool:
-    requested_rooms = set(ROOM_DEPENDENCIES.get(booking.room_type, [booking.room_type]))
-    others = (
-        db_session.query(Booking)
-        .filter(
-            Booking.id != booking.id,
-            Booking.status.in_(ACTIVE_BOOKING_STATUSES),
-            Booking.deleted_at.is_(None),
-            Booking.date_from < end_date,
-            Booking.date_to > start_date,
-        )
-        .all()
-    )
-    return any(
-        requested_rooms.intersection(ROOM_DEPENDENCIES.get(other.room_type, [other.room_type]))
-        for other in others
-    )
+    return not is_available(db_session, booking.room_type, start_date, end_date, booking.id)
 
 
 @router.message(BookingStates.waiting_for_guest_booking_edit, F.text)

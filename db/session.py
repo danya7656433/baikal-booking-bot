@@ -5,7 +5,9 @@ from sqlalchemy.orm import sessionmaker
 
 from services.paths import DATABASE_PATH
 
-engine = create_engine(f"sqlite:///{DATABASE_PATH.as_posix()}")
+engine = create_engine(
+    f"sqlite:///{DATABASE_PATH.as_posix()}", connect_args={"timeout": 15},
+)
 Session = sessionmaker(bind=engine)
 
 # Backward-compatible global session. New code should prefer get_session().

@@ -70,6 +70,8 @@ async def schedule_backups():
 
 
 async def main():
+    if not os.getenv("BOT_TOKEN") or not os.getenv("ADMIN_CHAT_ID"):
+        raise RuntimeError("Set BOT_TOKEN and ADMIN_CHAT_ID before starting the bot")
     run_migrations()
     init_settings()
 
@@ -100,11 +102,13 @@ async def main():
     try:
         from utils import check_support_timeouts
         from services.stay_service import schedule_stay_transitions
+        from services.web_notification_service import schedule_web_notifications
 
         asyncio.create_task(schedule_booking_notifications(bot))
         asyncio.create_task(schedule_backups())
         asyncio.create_task(check_support_timeouts(bot))
         asyncio.create_task(schedule_stay_transitions())
+        asyncio.create_task(schedule_web_notifications(bot))
         asyncio.create_task(schedule_daily_summary(bot))
         asyncio.create_task(flush_error_summaries(bot))
         logging.info("Background tasks registered")
@@ -115,6 +119,7 @@ async def main():
         await dp.start_polling(bot)
     except Exception:
         logging.exception("Bot polling failed")
+        raise
 
 
 if __name__ == "__main__":
@@ -124,3 +129,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception:
         logging.exception("Application crashed")
+        sys.exit(1)

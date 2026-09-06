@@ -1,0 +1,41 @@
+name: Checks
+
+on: [push, pull_request]
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag baikal-booking:check .
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -q
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chrome
+        working-directory: frontend
+      - name: Start isolated demo
+        run: python -m webapp.run --demo --port 8000 > /tmp/baikal-demo.log 2>&1 &
+      - name: Wait for API
+        run: curl --retry 15 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:8000/api/health
+      - run: npm test
+        working-directory: frontend
+      - run: python docs/check_landing_pixels.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-checks
+          path: test-results

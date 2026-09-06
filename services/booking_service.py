@@ -64,7 +64,7 @@ async def format_booking_info(booking, total: int | None = None) -> str:
     )
     room_name = room_type_names.get(booking.room_type, booking.room_type)
     return (
-        f"??????: {total_people} "
+        f"Гостей: {total_people} "
         f"(взрослых: {booking.adults}, детей: {booking.children}, "
         f"с местами: {children_needing_beds})\n"
         f"Номер: {room_name}\n"

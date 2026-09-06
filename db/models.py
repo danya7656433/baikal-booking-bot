@@ -238,7 +238,7 @@ class BookingYear(Base):
     __tablename__ = "booking_year"
 
     id = Column(Integer, primary_key=True)
-    year = Column(Integer, default=2025)
+    year = Column(Integer, default=lambda: datetime.now().year)
 
 
 class BookingSeason(Base):

@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from db import (
     AdminLog,
@@ -74,9 +76,10 @@ def init_settings():
         session.commit()
 
         if not session.query(BookingYear).first():
-            session.add(BookingYear(year=2025))
+            year = datetime.now(ZoneInfo("Asia/Irkutsk")).year
+            session.add(BookingYear(year=year))
             session.commit()
-            logging.info("Booking year initialized: 2025")
+            logging.info("Booking year initialized: %s", year)
 
         if not session.query(BookingSeason).first():
             session.add(BookingSeason(is_active=True))

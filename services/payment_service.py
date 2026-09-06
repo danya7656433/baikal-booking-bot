@@ -158,31 +158,24 @@ def _record_transaction(
     comment: str,
 ) -> dict:
     with get_session() as db_session:
-        booking = _require_booking(db_session, booking_id)
-        transactions = _transactions(db_session, booking_id)
-        _ensure_legacy_history(db_session, booking, transactions)
-        current = get_payment_balance(db_session, booking_id)
+        return record_transaction_in_session(db_session, booking_id, amount, kind, method, admin_id, comment)
 
-        if kind == "refund" and amount > current["net_paid"]:
-            raise ValueError("Refund cannot exceed net paid amount")
-        if kind == "adjustment" and current["paid"] + amount < 0:
-            raise ValueError("Adjustment would make paid amount negative")
 
-        db_session.add(
-            PaymentTransaction(
-                booking_id=booking_id,
-                amount=amount,
-                kind=kind,
-                payment_method=method,
-                admin_id=admin_id,
-                comment=comment or None,
-            )
-        )
-        db_session.flush()
-        _sync_booking(db_session, booking)
-
-    with get_session() as verification_session:
-        return get_payment_balance(verification_session, booking_id)
+def record_transaction_in_session(db_session, booking_id, amount, kind, method, admin_id, comment=""):
+    booking = _require_booking(db_session, booking_id)
+    transactions = _transactions(db_session, booking_id)
+    _ensure_legacy_history(db_session, booking, transactions)
+    current = get_payment_balance(db_session, booking_id)
+    if kind == "refund" and amount > current["net_paid"]:
+        raise ValueError("Refund cannot exceed net paid amount")
+    if kind == "adjustment" and current["paid"] + amount < 0:
+        raise ValueError("Adjustment would make paid amount negative")
+    if kind not in {"payment", "refund", "adjustment"} or (kind != "adjustment" and amount <= 0):
+        raise ValueError("Invalid payment transaction")
+    db_session.add(PaymentTransaction(booking_id=booking_id, amount=amount, kind=kind,
+        payment_method=method, admin_id=admin_id, comment=comment or None))
+    db_session.flush()
+    return _sync_booking(db_session, booking)
 
 
 def add_payment(

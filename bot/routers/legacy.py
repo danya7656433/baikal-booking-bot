@@ -6799,7 +6799,7 @@ async def cancel_booking(callback: CallbackQuery, state: FSMContext):
     clear_booking_draft(callback.from_user.id)
     await state.clear()
     await callback.message.answer("Бронирование отменено")
-    await cmd_start(callback.message)
+    await cmd_start(callback.message, state)
 
 
 @router.callback_query(F.data == "cancel_booking")
@@ -7236,6 +7236,13 @@ async def download_log(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("cancel_booking_"))
 async def cancel_user_booking(callback: CallbackQuery, state: FSMContext):
     booking_id = int(callback.data.split("_")[2])
+    with get_session() as db_session:
+        booking = db_session.query(Booking).filter_by(
+            id=booking_id, user_id=callback.from_user.id, deleted_at=None,
+        ).first()
+        if not booking or booking.status not in ACTIVE_BOOKING_STATUSES:
+            await callback.answer("Заявка недоступна для отмены.", show_alert=True)
+            return
     await state.update_data(booking_id=booking_id)
     await callback.message.answer("Укажите причину отмены заявки:")
     await state.set_state(BookingStates.waiting_for_cancellation_reason)
@@ -7244,9 +7251,11 @@ async def cancel_user_booking(callback: CallbackQuery, state: FSMContext):
 @router.message(BookingStates.waiting_for_cancellation_reason)
 async def process_cancellation_reason(message: Message, state: FSMContext):
     data = await state.get_data()
-    booking_id = data["booking_id"]
-    booking = session.query(Booking).filter_by(id=booking_id).first()
-    if booking:
+    booking_id = data.get("booking_id")
+    booking = session.query(Booking).filter_by(
+        id=booking_id, user_id=message.from_user.id, deleted_at=None,
+    ).first()
+    if booking and booking.status in ACTIVE_BOOKING_STATUSES:
         booking.status = BookingStatus.AWAITING_CANCELLATION.value
         booking.comment = f"Причина отмены: {message.text}\n{booking.comment}"
         session.commit()

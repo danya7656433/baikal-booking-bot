@@ -6,6 +6,7 @@ from db import Booking, BookingChange, get_session
 from services.booking_service import get_booking_people_count
 from services.payment_service import get_payment_balance
 from services.pricing_service import calculate_revenue
+from services.inventory_service import is_available, room_capacity
 
 BOOKING_STAGES = {
     "new", "pending", "awaiting_payment", "awaiting_payment_confirmation",
@@ -159,6 +160,10 @@ async def update_booking_accommodation(
             raise ValueError("Дата выезда должна быть позже даты заезда")
         if new_room not in room_type_names:
             raise ValueError("Неизвестный тип проживания")
+        if get_booking_people_count(booking) > room_capacity(new_room):
+            raise ValueError("Количество гостей превышает вместимость")
+        if not is_available(db_session, new_room, new_start, new_end, booking.id):
+            raise ValueError("Выбранные даты или номер уже заняты")
         before = {
             "date_from": booking.date_from.isoformat(),
             "date_to": booking.date_to.isoformat(),

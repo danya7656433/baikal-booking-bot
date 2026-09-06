@@ -1,3 +1,5 @@
+from html import escape
+
 from config import BOOKING_STATUS_LABELS, room_type_names
 from db import Booking, get_session
 from services.booking_service import get_booking_people_count, get_children_beds
@@ -54,6 +56,8 @@ async def build_booking_card_data(booking_id: int) -> dict:
 
 
 def _status_text(data: dict) -> str:
+    if data["booking_status"] not in {"paid", "awaiting_payment"}:
+        return BOOKING_STATUS_LABELS.get(data["booking_status"], data["booking_status"])
     return PAYMENT_STATUS_LABELS.get(
         data["payment_status"],
         BOOKING_STATUS_LABELS.get(data["booking_status"], data["booking_status"]),
@@ -61,6 +65,7 @@ def _status_text(data: dict) -> str:
 
 
 def format_guest_booking_card(data: dict) -> str:
+    data = {key: escape(value) if isinstance(value, str) else value for key, value in data.items()}
     return (
         f"📌 Заявка #{data['id']}\n"
         f"🏠 Номер: {data['room']}\n"
@@ -79,6 +84,7 @@ def format_guest_booking_card(data: dict) -> str:
 
 
 def format_admin_booking_card(data: dict) -> str:
+    data = {key: escape(value) if isinstance(value, str) else value for key, value in data.items()}
     username = f"@{data['username']}" if data["username"] else "без ника"
     return (
         f"📌 Заявка #{data['id']}\n"
